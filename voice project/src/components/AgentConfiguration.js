@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Save, Plus, Trash2, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Save, Plus, Trash2, AlertCircle, Loader } from 'lucide-react';
 
 const AgentConfiguration = () => {
   const [config, setConfig] = useState({
@@ -58,6 +58,73 @@ const AgentConfiguration = () => {
 
   const [isEditing, setIsEditing] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [currentConfigId, setCurrentConfigId] = useState(null);
+
+  // API base URL
+  const API_BASE_URL = 'http://localhost:8000/api/v1';
+
+  // Transform config to API format
+  const transformConfigToAPI = (config) => ({
+    agent_name: config.agentName,
+    greeting: config.greeting,
+    primary_objective: config.primaryObjective,
+    conversation_flow: config.conversationFlow.map(step => ({
+      step: step.step,
+      prompt: step.prompt,
+      required: step.required,
+      order: step.order
+    })),
+    fallback_responses: config.fallbackResponses,
+    call_ending_conditions: config.callEndingConditions,
+    is_active: true
+  });
+
+  // Transform API response to component format
+  const transformConfigFromAPI = (apiConfig) => ({
+    agentName: apiConfig.agent_name,
+    greeting: apiConfig.greeting,
+    primaryObjective: apiConfig.primary_objective,
+    conversationFlow: apiConfig.conversation_flow.map(step => ({
+      id: step.id || Date.now() + Math.random(),
+      step: step.step,
+      prompt: step.prompt,
+      required: step.required,
+      order: step.order
+    })),
+    fallbackResponses: apiConfig.fallback_responses || [],
+    callEndingConditions: apiConfig.call_ending_conditions || []
+  });
+
+  // Load existing configurations on component mount
+  useEffect(() => {
+    loadConfigurations();
+  }, []);
+
+  const loadConfigurations = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const response = await fetch(`${API_BASE_URL}/agent-configurations`);
+      if (!response.ok) {
+        throw new Error('Failed to load configurations');
+      }
+      const data = await response.json();
+      
+      // If there are existing configurations, load the first one
+      if (data.configurations && data.configurations.length > 0) {
+        const firstConfig = data.configurations[0];
+        setConfig(transformConfigFromAPI(firstConfig));
+        setCurrentConfigId(firstConfig.id);
+      }
+    } catch (err) {
+      setError('Failed to load configurations: ' + err.message);
+      console.error('Error loading configurations:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleInputChange = (field, value) => {
     setConfig(prev => ({
@@ -96,11 +163,47 @@ const AgentConfiguration = () => {
     }));
   };
 
-  const handleSave = () => {
-    // Here you would typically save to your backend
-    setIsEditing(false);
-    setShowSuccess(true);
-    setTimeout(() => setShowSuccess(false), 3000);
+  const handleSave = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      const apiConfig = transformConfigToAPI(config);
+      const url = currentConfigId 
+        ? `${API_BASE_URL}/agent-configurations/${currentConfigId}`
+        : `${API_BASE_URL}/agent-configurations`;
+      
+      const method = currentConfigId ? 'PUT' : 'POST';
+      
+      const response = await fetch(url, {
+        method: method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(apiConfig),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Failed to ${currentConfigId ? 'update' : 'create'} configuration`);
+      }
+      
+      const data = await response.json();
+      
+      // Update the current config ID if it's a new configuration
+      if (!currentConfigId) {
+        setCurrentConfigId(data.config.id);
+      }
+      
+      setIsEditing(false);
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+      
+    } catch (err) {
+      setError(`Failed to save configuration: ${err.message}`);
+      console.error('Error saving configuration:', err);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const moveStep = (id, direction) => {
@@ -135,16 +238,21 @@ const AgentConfiguration = () => {
               </button>
               <button
                 onClick={handleSave}
-                className="px-4 py-2 text-sm font-medium text-white bg-primary-600 border border-transparent rounded-md hover:bg-primary-700 flex items-center"
+                disabled={isLoading}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
               >
-                <Save className="w-4 h-4 mr-2" />
-                Save Changes
+                {isLoading ? (
+                  <Loader className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4 mr-2" />
+                )}
+                {isLoading ? 'Saving...' : 'Save Changes'}
               </button>
             </>
           ) : (
             <button
               onClick={() => setIsEditing(true)}
-              className="px-4 py-2 text-sm font-medium text-white bg-primary-600 border border-transparent rounded-md hover:bg-primary-700"
+              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700"
             >
               Edit Configuration
             </button>
@@ -154,14 +262,30 @@ const AgentConfiguration = () => {
 
       {/* Success Message */}
       {showSuccess && (
-        <div className="bg-success-50 border border-success-200 rounded-md p-4">
+        <div className="bg-green-50 border border-green-200 rounded-md p-4">
           <div className="flex">
             <div className="flex-shrink-0">
-              <AlertCircle className="h-5 w-5 text-success-400" />
+              <AlertCircle className="h-5 w-5 text-green-400" />
             </div>
             <div className="ml-3">
-              <p className="text-sm font-medium text-success-800">
+              <p className="text-sm font-medium text-green-800">
                 Configuration saved successfully!
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-md p-4">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <AlertCircle className="h-5 w-5 text-red-400" />
+            </div>
+            <div className="ml-3">
+              <p className="text-sm font-medium text-red-800">
+                {error}
               </p>
             </div>
           </div>
@@ -181,7 +305,7 @@ const AgentConfiguration = () => {
               value={config.agentName}
               onChange={(e) => handleInputChange('agentName', e.target.value)}
               disabled={!isEditing}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-50 disabled:text-gray-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
             />
           </div>
           <div>
@@ -193,7 +317,7 @@ const AgentConfiguration = () => {
               onChange={(e) => handleInputChange('greeting', e.target.value)}
               disabled={!isEditing}
               rows={3}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-50 disabled:text-gray-500"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
             />
           </div>
         </div>
@@ -206,7 +330,7 @@ const AgentConfiguration = () => {
             onChange={(e) => handleInputChange('primaryObjective', e.target.value)}
             disabled={!isEditing}
             rows={2}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-50 disabled:text-gray-500"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
           />
         </div>
       </div>
@@ -218,7 +342,7 @@ const AgentConfiguration = () => {
           {isEditing && (
             <button
               onClick={addConversationStep}
-              className="px-3 py-1 text-sm font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 flex items-center"
+              className="px-3 py-1 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 flex items-center"
             >
               <Plus className="w-4 h-4 mr-1" />
               Add Step
@@ -247,7 +371,7 @@ const AgentConfiguration = () => {
                     onChange={(e) => handleConversationStepChange(step.id, 'prompt', e.target.value)}
                     disabled={!isEditing}
                     rows={2}
-                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-50 disabled:text-gray-500"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
                     placeholder="Enter the prompt for this conversation step..."
                   />
                   <div className="flex items-center space-x-4">
@@ -257,7 +381,7 @@ const AgentConfiguration = () => {
                         checked={step.required}
                         onChange={(e) => handleConversationStepChange(step.id, 'required', e.target.checked)}
                         disabled={!isEditing}
-                        className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                       />
                       <span className="ml-2 text-sm text-gray-700">Required step</span>
                     </label>
@@ -308,7 +432,7 @@ const AgentConfiguration = () => {
                   handleInputChange('fallbackResponses', newResponses);
                 }}
                 disabled={!isEditing}
-                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-50 disabled:text-gray-500"
+                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
               />
               {isEditing && (
                 <button
@@ -329,7 +453,7 @@ const AgentConfiguration = () => {
                 const newResponses = [...config.fallbackResponses, 'New fallback response'];
                 handleInputChange('fallbackResponses', newResponses);
               }}
-              className="px-3 py-1 text-sm font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 flex items-center"
+              className="px-3 py-1 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 flex items-center"
             >
               <Plus className="w-4 h-4 mr-1" />
               Add Fallback Response
@@ -353,7 +477,7 @@ const AgentConfiguration = () => {
                   handleInputChange('callEndingConditions', newConditions);
                 }}
                 disabled={!isEditing}
-                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-50 disabled:text-gray-500"
+                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-50 disabled:text-gray-500"
               />
               {isEditing && (
                 <button
@@ -374,7 +498,7 @@ const AgentConfiguration = () => {
                 const newConditions = [...config.callEndingConditions, 'New ending condition'];
                 handleInputChange('callEndingConditions', newConditions);
               }}
-              className="px-3 py-1 text-sm font-medium text-primary-600 bg-primary-50 border border-primary-200 rounded-md hover:bg-primary-100 flex items-center"
+              className="px-3 py-1 text-sm font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 flex items-center"
             >
               <Plus className="w-4 h-4 mr-1" />
               Add Ending Condition

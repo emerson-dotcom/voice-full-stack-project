@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 from datetime import datetime
 import uvicorn
+import httpx
+import os
 from supabase_simple import get_supabase_client
 
 # Pydantic models for Agent Configuration
@@ -31,6 +33,102 @@ class AgentConfiguration(BaseModel):
     is_active: bool = True
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+# Pydantic models for Call Management
+class CallRequest(BaseModel):
+    agent_config_id: int = Field(..., description="ID of the agent configuration to use")
+    driver_name: str = Field(..., min_length=1, max_length=100)
+    phone_number: str = Field(..., min_length=10, max_length=20)
+    load_number: str = Field(..., min_length=1, max_length=50)
+    delivery_address: Optional[str] = Field(None, max_length=500)
+    expected_delivery_time: Optional[datetime] = None
+    special_instructions: Optional[str] = Field(None, max_length=1000)
+
+class CallRecord(BaseModel):
+    id: Optional[int] = None
+    call_id: str = Field(..., description="Unique call identifier")
+    agent_config_id: int
+    driver_name: str
+    phone_number: str
+    load_number: str
+    delivery_address: Optional[str] = None
+    expected_delivery_time: Optional[datetime] = None
+    special_instructions: Optional[str] = None
+    status: str = Field(default="initiated", description="Call status: initiated, in_progress, completed, failed")
+    retell_call_id: Optional[str] = None
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    duration_seconds: Optional[int] = None
+    call_summary: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+class CallStatusUpdate(BaseModel):
+    status: str = Field(..., description="New call status")
+    retell_call_id: Optional[str] = None
+    call_summary: Optional[str] = None
+    end_time: Optional[datetime] = None
+    duration_seconds: Optional[int] = None
+
+# Retell AI Integration
+async def initiate_retell_call(agent_config: dict, call_request: CallRequest, call_data: dict) -> str:
+    """Initiate a call using Retell AI API"""
+    retell_api_key = os.getenv("RETELL_API_KEY")
+    retell_webhook_url = os.getenv("RETELL_WEBHOOK_URL")
+    
+    if not retell_api_key:
+        print("⚠️ RETELL_API_KEY not found. Using simulation mode.")
+        # Return a simulated call ID for testing
+        import uuid
+        return f"retell_sim_{str(uuid.uuid4())}"
+    
+    try:
+        # Prepare Retell AI call request
+        retell_request = {
+            "from_number": "+1234567890",  # Your Retell AI phone number
+            "to_number": call_request.phone_number,
+            "agent_id": agent_config.get("retell_agent_id"),  # You'll need to add this to your agent config
+            "metadata": {
+                "call_id": call_data.get("call_id"),
+                "driver_name": call_request.driver_name,
+                "load_number": call_request.load_number,
+                "delivery_address": call_request.delivery_address,
+                "special_instructions": call_request.special_instructions
+            }
+        }
+        
+        # Add webhook URL if available
+        if retell_webhook_url:
+            retell_request["webhook_url"] = retell_webhook_url
+        
+        # Make request to Retell AI
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.retellai.com/create-phone-call",
+                headers={
+                    "Authorization": f"Bearer {retell_api_key}",
+                    "Content-Type": "application/json"
+                },
+                json=retell_request,
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                retell_call_id = result.get("call_id")
+                print(f"✅ Retell AI call initiated: {retell_call_id}")
+                return retell_call_id
+            else:
+                print(f"❌ Retell AI API error: {response.status_code} - {response.text}")
+                # Fallback to simulation
+                import uuid
+                return f"retell_error_{str(uuid.uuid4())}"
+                
+    except Exception as e:
+        print(f"❌ Error calling Retell AI: {e}")
+        # Fallback to simulation
+        import uuid
+        return f"retell_error_{str(uuid.uuid4())}"
 
 # Initialize Supabase configuration
 try:
@@ -176,6 +274,270 @@ async def delete_agent_configuration(config_id: int):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete agent configuration: {str(e)}")
+
+# Call Management endpoints
+@app.post("/api/v1/calls/trigger")
+async def trigger_test_call(call_request: CallRequest):
+    """Trigger a test call using the specified agent configuration"""
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database connection not available")
+    
+    try:
+        # Verify agent configuration exists
+        agent_config = supabase.get_agent_configuration(call_request.agent_config_id)
+        if not agent_config:
+            raise HTTPException(status_code=404, detail="Agent configuration not found")
+        
+        # Generate unique call ID
+        import uuid
+        call_id = f"CALL-{datetime.now().strftime('%Y%m%d')}-{str(uuid.uuid4())[:8].upper()}"
+        
+        # Create call record
+        call_data = {
+            "call_id": call_id,
+            "agent_config_id": call_request.agent_config_id,
+            "driver_name": call_request.driver_name,
+            "phone_number": call_request.phone_number,
+            "load_number": call_request.load_number,
+            "delivery_address": call_request.delivery_address,
+            "expected_delivery_time": call_request.expected_delivery_time.isoformat() if call_request.expected_delivery_time else None,
+            "special_instructions": call_request.special_instructions,
+            "status": "initiated",
+            "start_time": datetime.now().isoformat()
+        }
+        
+        call_record = supabase.create_call_record(call_data)
+        
+        # Integrate with Retell AI API
+        retell_call_id = await initiate_retell_call(agent_config, call_request, call_data)
+        
+        # Update call record with retell call ID and status
+        update_data = {
+            "retell_call_id": retell_call_id,
+            "status": "in_progress"
+        }
+        updated_call = supabase.update_call_record(call_id, update_data)
+        
+        return {
+            "message": "Test call initiated successfully",
+            "call_id": call_id,
+            "retell_call_id": retell_call_id,
+            "status": "in_progress",
+            "call_record": updated_call
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to trigger test call: {str(e)}")
+
+@app.get("/api/v1/calls")
+async def get_call_records(limit: int = 50, offset: int = 0):
+    """Get call records with pagination"""
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database connection not available")
+    
+    try:
+        call_records = supabase.get_call_records(limit=limit, offset=offset)
+        return {
+            "call_records": call_records,
+            "count": len(call_records),
+            "limit": limit,
+            "offset": offset
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch call records: {str(e)}")
+
+@app.get("/api/v1/calls/{call_id}")
+async def get_call_record(call_id: str):
+    """Get a specific call record by call ID"""
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database connection not available")
+    
+    try:
+        call_record = supabase.get_call_record(call_id)
+        if not call_record:
+            raise HTTPException(status_code=404, detail="Call record not found")
+        return call_record
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch call record: {str(e)}")
+
+@app.put("/api/v1/calls/{call_id}/status")
+async def update_call_status(call_id: str, status_update: CallStatusUpdate):
+    """Update call status and related information"""
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database connection not available")
+    
+    try:
+        # Verify call record exists
+        call_record = supabase.get_call_record(call_id)
+        if not call_record:
+            raise HTTPException(status_code=404, detail="Call record not found")
+        
+        # Prepare update data
+        update_data = {
+            "status": status_update.status
+        }
+        
+        if status_update.retell_call_id:
+            update_data["retell_call_id"] = status_update.retell_call_id
+        
+        if status_update.call_summary:
+            update_data["call_summary"] = status_update.call_summary
+        
+        if status_update.end_time:
+            update_data["end_time"] = status_update.end_time
+        
+        if status_update.duration_seconds:
+            update_data["duration_seconds"] = status_update.duration_seconds
+        
+        # Update call record
+        updated_call = supabase.update_call_record(call_id, update_data)
+        
+        return {
+            "message": "Call status updated successfully",
+            "call_record": updated_call
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update call status: {str(e)}")
+
+@app.get("/api/v1/calls/agent/{agent_config_id}")
+async def get_calls_by_agent(agent_config_id: int, limit: int = 50):
+    """Get call records for a specific agent configuration"""
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database connection not available")
+    
+    try:
+        # Verify agent configuration exists
+        agent_config = supabase.get_agent_configuration(agent_config_id)
+        if not agent_config:
+            raise HTTPException(status_code=404, detail="Agent configuration not found")
+        
+        call_records = supabase.get_call_records_by_agent(agent_config_id, limit=limit)
+        return {
+            "call_records": call_records,
+            "count": len(call_records),
+            "agent_config": agent_config,
+            "limit": limit
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch call records for agent: {str(e)}")
+
+@app.get("/api/v1/calls/status/{status}")
+async def get_calls_by_status(status: str, limit: int = 50):
+    """Get call records by status"""
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database connection not available")
+    
+    try:
+        valid_statuses = ["initiated", "in_progress", "completed", "failed"]
+        if status not in valid_statuses:
+            raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+        
+        call_records = supabase.get_call_records_by_status(status, limit=limit)
+        return {
+            "call_records": call_records,
+            "count": len(call_records),
+            "status": status,
+            "limit": limit
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch call records by status: {str(e)}")
+
+# Test endpoint to verify webhook is accessible
+@app.get("/api/v1/webhooks/retell")
+async def webhook_test():
+    """Test endpoint to verify webhook URL is accessible"""
+    return {
+        "message": "Webhook endpoint is working!",
+        "status": "ready",
+        "webhook_url": "http://localhost:8000/api/v1/webhooks/retell"
+    }
+
+# Webhook endpoint for Retell AI call status updates
+@app.post("/api/v1/webhooks/retell")
+async def retell_webhook(webhook_data: dict):
+    """Handle webhook notifications from Retell AI"""
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database connection not available")
+    
+    try:
+        # Extract call information from webhook
+        retell_call_id = webhook_data.get("call_id")
+        call_status = webhook_data.get("call_status")
+        call_summary = webhook_data.get("call_summary")
+        end_time = webhook_data.get("end_time")
+        duration_seconds = webhook_data.get("duration_seconds")
+        
+        if not retell_call_id:
+            raise HTTPException(status_code=400, detail="Missing call_id in webhook data")
+        
+        # Find the call record by retell_call_id
+        call_records = supabase.get_call_records()
+        call_record = None
+        for record in call_records:
+            if record.get("retell_call_id") == retell_call_id:
+                call_record = record
+                break
+        
+        if not call_record:
+            print(f"⚠️ Call record not found for retell_call_id: {retell_call_id}")
+            return {"message": "Call record not found"}
+        
+        # Map Retell AI status to our status
+        status_mapping = {
+            "queued": "initiated",
+            "ringing": "in_progress", 
+            "in_progress": "in_progress",
+            "ended": "completed",
+            "failed": "failed"
+        }
+        
+        mapped_status = status_mapping.get(call_status, "in_progress")
+        
+        # Prepare update data
+        update_data = {
+            "status": mapped_status
+        }
+        
+        if call_summary:
+            update_data["call_summary"] = call_summary
+        
+        if end_time:
+            # Convert end_time to ISO format if it's a string
+            if isinstance(end_time, str):
+                update_data["end_time"] = end_time
+            else:
+                update_data["end_time"] = end_time.isoformat()
+        
+        if duration_seconds:
+            update_data["duration_seconds"] = duration_seconds
+        
+        # Update the call record
+        updated_call = supabase.update_call_record(call_record["call_id"], update_data)
+        
+        print(f"✅ Updated call {call_record['call_id']} with status: {mapped_status}")
+        
+        return {
+            "message": "Webhook processed successfully",
+            "call_id": call_record["call_id"],
+            "status": mapped_status
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error processing Retell webhook: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to process webhook: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(

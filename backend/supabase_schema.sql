@@ -113,3 +113,95 @@ INSERT INTO agent_configurations (
         'Driver hangs up'
     ]
 ) ON CONFLICT DO NOTHING;
+
+-- Create call_records table
+CREATE TABLE IF NOT EXISTS call_records (
+    id BIGSERIAL PRIMARY KEY,
+    call_id VARCHAR(100) NOT NULL UNIQUE,
+    agent_config_id BIGINT NOT NULL REFERENCES agent_configurations(id) ON DELETE CASCADE,
+    driver_name VARCHAR(100) NOT NULL,
+    phone_number VARCHAR(20) NOT NULL,
+    load_number VARCHAR(50) NOT NULL,
+    delivery_address TEXT,
+    expected_delivery_time TIMESTAMP WITH TIME ZONE,
+    special_instructions TEXT,
+    status VARCHAR(20) DEFAULT 'initiated' CHECK (status IN ('initiated', 'in_progress', 'completed', 'failed')),
+    retell_call_id VARCHAR(100),
+    start_time TIMESTAMP WITH TIME ZONE,
+    end_time TIMESTAMP WITH TIME ZONE,
+    duration_seconds INTEGER,
+    call_summary TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create indexes for call_records table
+CREATE INDEX IF NOT EXISTS idx_call_records_call_id ON call_records(call_id);
+CREATE INDEX IF NOT EXISTS idx_call_records_agent_config_id ON call_records(agent_config_id);
+CREATE INDEX IF NOT EXISTS idx_call_records_status ON call_records(status);
+CREATE INDEX IF NOT EXISTS idx_call_records_created_at ON call_records(created_at);
+CREATE INDEX IF NOT EXISTS idx_call_records_driver_name ON call_records(driver_name);
+CREATE INDEX IF NOT EXISTS idx_call_records_load_number ON call_records(load_number);
+
+-- Enable Row Level Security for call_records
+ALTER TABLE call_records ENABLE ROW LEVEL SECURITY;
+
+-- Create policies for call_records
+CREATE POLICY "Allow all operations for authenticated users" ON call_records
+    FOR ALL USING (true);
+
+CREATE POLICY "Allow all operations for anonymous users" ON call_records
+    FOR ALL USING (true);
+
+-- Create trigger for call_records updated_at
+CREATE TRIGGER update_call_records_updated_at 
+    BEFORE UPDATE ON call_records 
+    FOR EACH ROW 
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Insert some sample call records (optional)
+INSERT INTO call_records (
+    call_id,
+    agent_config_id,
+    driver_name,
+    phone_number,
+    load_number,
+    delivery_address,
+    expected_delivery_time,
+    special_instructions,
+    status,
+    start_time,
+    end_time,
+    duration_seconds,
+    call_summary
+) VALUES 
+(
+    'CALL-20241201-001',
+    1,
+    'John Smith',
+    '+1-555-123-4567',
+    'LOAD-2024-001',
+    '123 Main St, Anytown, USA',
+    '2024-12-01 14:00:00+00',
+    'Fragile items - handle with care',
+    'completed',
+    '2024-12-01 10:30:00+00',
+    '2024-12-01 10:33:45+00',
+    225,
+    'Driver confirmed delivery details and address. No issues reported.'
+),
+(
+    'CALL-20241201-002',
+    1,
+    'Sarah Johnson',
+    '+1-555-987-6543',
+    'LOAD-2024-002',
+    '456 Oak Ave, Somewhere, USA',
+    '2024-12-01 16:00:00+00',
+    NULL,
+    'in_progress',
+    '2024-12-01 11:15:00+00',
+    NULL,
+    NULL,
+    NULL
+) ON CONFLICT (call_id) DO NOTHING;

@@ -71,10 +71,93 @@ class CallStatusUpdate(BaseModel):
     duration_seconds: Optional[int] = None
 
 # Retell AI Integration
+async def create_retell_agent(agent_config: dict) -> str:
+    """Create or get Retell AI agent based on configuration"""
+    retell_api_key = os.getenv("RETELL_API_KEY")
+    
+    if not retell_api_key:
+        print("⚠️ RETELL_API_KEY not found. Cannot create Retell agent.")
+        return None
+    
+    try:
+        # Check if agent already exists in Retell AI
+        existing_agent_id = agent_config.get("retell_agent_id")
+        if existing_agent_id:
+            return existing_agent_id
+        
+        # Create new agent in Retell AI
+        agent_request = {
+            "agent_name": agent_config.get("agent_name", "Voice Agent"),
+            "llm_dynamic_config": {
+                "llm_id": "gpt-4o-mini",  # You can change this to other models
+                "llm_type": "retell-llm",
+                "llm_websocket_url": "wss://api.retellai.com/v2/llm/stream",
+                "llm_request_mapping": {
+                    "model": "gpt-4o-mini",
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": f"""
+You are a professional delivery coordination agent. Your primary objective is: {agent_config.get('primary_objective', 'Coordinate delivery details with drivers')}
+
+Greeting: {agent_config.get('greeting', 'Hello! This is your delivery coordination call.')}
+
+Follow this conversation flow:
+{chr(10).join([f"- {step.get('step', '')}: {step.get('prompt', '')}" for step in agent_config.get('conversation_flow', [])])}
+
+Fallback responses: {', '.join(agent_config.get('fallback_responses', ['I apologize, could you please repeat that?']))}
+
+Call ending conditions: {', '.join(agent_config.get('call_ending_conditions', ['All information confirmed', 'Driver confirms understanding']))}
+
+Be professional, clear, and helpful. Keep responses concise and focused on delivery coordination.
+                            """
+                        }
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 200
+                }
+            },
+            "voice_id": "11labs-Adrian",  # You can change this to other voices
+            "voice_config": {
+                "speed": 1.0,
+                "pitch": 1.0,
+                "stability": 0.5
+            }
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.retellai.com/v2/create-agent",
+                headers={
+                    "Authorization": f"Bearer {retell_api_key}",
+                    "Content-Type": "application/json"
+                },
+                json=agent_request,
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                agent_id = result.get("agent_id")
+                print(f"✅ Retell AI agent created: {agent_id}")
+                
+                # Update agent config with Retell agent ID
+                supabase.update_agent_configuration(agent_config["id"], {"retell_agent_id": agent_id})
+                
+                return agent_id
+            else:
+                print(f"❌ Retell AI agent creation error: {response.status_code} - {response.text}")
+                return None
+                
+    except Exception as e:
+        print(f"❌ Error creating Retell AI agent: {e}")
+        return None
+
 async def initiate_retell_call(agent_config: dict, call_request: CallRequest, call_data: dict) -> str:
     """Initiate a call using Retell AI API"""
     retell_api_key = os.getenv("RETELL_API_KEY")
     retell_webhook_url = os.getenv("RETELL_WEBHOOK_URL")
+    retell_from_number = os.getenv("RETELL_FROM_NUMBER")  # Your verified Retell AI number
     
     if not retell_api_key:
         print("⚠️ RETELL_API_KEY not found. Using simulation mode.")
@@ -82,12 +165,24 @@ async def initiate_retell_call(agent_config: dict, call_request: CallRequest, ca
         import uuid
         return f"retell_sim_{str(uuid.uuid4())}"
     
+    if not retell_from_number:
+        print("⚠️ RETELL_FROM_NUMBER not found. Please set your verified Retell AI phone number.")
+        import uuid
+        return f"retell_error_{str(uuid.uuid4())}"
+    
     try:
+        # Get or create Retell AI agent
+        agent_id = await create_retell_agent(agent_config)
+        if not agent_id:
+            print("❌ Failed to create/get Retell AI agent")
+            import uuid
+            return f"retell_error_{str(uuid.uuid4())}"
+        
         # Prepare Retell AI call request
         retell_request = {
-            "from_number": "+1234567890",  # Your Retell AI phone number
+            "from_number": retell_from_number,
             "to_number": call_request.phone_number,
-            "agent_id": agent_config.get("retell_agent_id"),  # You'll need to add this to your agent config
+            "agent_id": agent_id,
             "metadata": {
                 "call_id": call_data.get("call_id"),
                 "driver_name": call_request.driver_name,
@@ -104,7 +199,7 @@ async def initiate_retell_call(agent_config: dict, call_request: CallRequest, ca
         # Make request to Retell AI
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                "https://api.retellai.com/create-phone-call",
+                "https://api.retellai.com/v2/create-phone-call",
                 headers={
                     "Authorization": f"Bearer {retell_api_key}",
                     "Content-Type": "application/json"
@@ -117,6 +212,7 @@ async def initiate_retell_call(agent_config: dict, call_request: CallRequest, ca
                 result = response.json()
                 retell_call_id = result.get("call_id")
                 print(f"✅ Retell AI call initiated: {retell_call_id}")
+                print(f"📞 Calling {call_request.phone_number} from {retell_from_number}")
                 return retell_call_id
             else:
                 print(f"❌ Retell AI API error: {response.status_code} - {response.text}")

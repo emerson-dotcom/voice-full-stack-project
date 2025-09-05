@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Retell AI Web Call Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .status.idle { background-color: #e3f2fd; color: #1976d2; }
+        .status.connecting { background-color: #fff3e0; color: #f57c00; }
+        .status.connected { background-color: #e8f5e8; color: #388e3c; }
+        .status.ended { background-color: #f3e5f5; color: #7b1fa2; }
+        .status.error { background-color: #ffebee; color: #d32f2f; }
+        
+        button {
+            background-color: #1976d2;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+        }
+        button:hover { background-color: #1565c0; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            margin: 5px 0;
+            font-family: monospace;
+        }
+        
+        .instructions {
+            background-color: #e3f2fd;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        
+        .error {
+            background-color: #ffebee;
+            color: #d32f2f;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        
+        .success {
+            background-color: #e8f5e8;
+            color: #388e3c;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 Retell AI Web Call Test</h1>
+        <p>This page demonstrates how to properly join a Retell AI web call using the Web SDK.</p>
+        
+        <div class="instructions">
+            <h3>📋 Instructions:</h3>
+            <ol>
+                <li>Your web call was created successfully with this access token:</li>
+                <li><strong>Paste the access token below and click "Join Call"</strong></li>
+                <li>Allow microphone permissions when prompted</li>
+                <li>The call will start automatically using the Retell Web SDK</li>
+            </ol>
+        </div>
+        
+        <div>
+            <label for="accessToken">Access Token:</label>
+            <input type="text" id="accessToken" placeholder="Paste your access token here..." value="eyJhbGciOiJIUzI1NiJ9.eyJ2aWRlbyI6eyJyb29tSm9pbiI6dHJ1ZSwicm9vbSI6IndlYl9jYWxsX2EwNzkzMGJkOTMzZTBmNzdmZWJiODY3Mjg1ZCJ9LCJpc3MiOiJBUElqWGZBMzVHTmM3WHgiLCJleHAiOjE3NTcwOTY5NTcsIm5iZiI6MCwic3ViIjoiY2xpZW50In0.lUN0ckZMkXCo5n3ABY6zzFqE6dcv_PUIZYUrwlGY4Yk">
+            <button onclick="joinCall()" id="joinBtn">Join Call</button>
+            <button onclick="endCall()" id="endBtn" disabled>End Call</button>
+        </div>
+        
+        <div id="status" class="status idle">Status: Idle - Ready to join call</div>
+        <div id="error" class="error" style="display: none;"></div>
+        <div id="success" class="success" style="display: none;"></div>
+        
+        <div>
+            <h3>📊 Call Information:</h3>
+            <div id="callInfo">
+                <p><strong>Call Status:</strong> <span id="callStatus">Not started</span></p>
+                <p><strong>Connection Status:</strong> <span id="connectionStatus">Disconnected</span></p>
+                <p><strong>Error Count:</strong> <span id="errorCount">0</span></p>
+            </div>
+        </div>
+        
+        <div>
+            <h3>🔧 Debug Information:</h3>
+            <div id="debugInfo" style="background-color: #f5f5f5; padding: 10px; border-radius: 5px; font-family: monospace; font-size: 12px;">
+                Ready to start...
+            </div>
+        </div>
+        
+        <div class="instructions">
+            <h3>⚠️ Important Notes:</h3>
+            <ul>
+                <li><strong>Don't use the direct URL</strong> - it will show "Page Not Found"</li>
+                <li><strong>Use this page with the Retell Web SDK</strong> - this is the correct way</li>
+                <li><strong>Join within 30 seconds</strong> of creating the call</li>
+                <li><strong>Allow microphone permissions</strong> when prompted</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Retell Web SDK -->
+    <script src="https://unpkg.com/retell-client-js-sdk@latest/dist/retell-client-js-sdk.umd.js"></script>
+    
+    <script>
+        let retellClient = null;
+        let callStatus = 'idle';
+        let errorCount = 0;
+        
+        // Initialize Retell client
+        function initRetellClient() {
+            try {
+                retellClient = new RetellWebClient();
+                
+                // Set up event listeners
+                retellClient.on('call_started', () => {
+                    console.log('Call started');
+                    updateStatus('connected', 'Call started successfully! 🎉');
+                    updateCallInfo('connected', 'Connected');
+                    document.getElementById('joinBtn').disabled = true;
+                    document.getElementById('endBtn').disabled = false;
+                    showSuccess('Call connected successfully! You can now talk to the agent.');
+                });
+                
+                retellClient.on('call_ended', () => {
+                    console.log('Call ended');
+                    updateStatus('ended', 'Call ended');
+                    updateCallInfo('ended', 'Disconnected');
+                    document.getElementById('joinBtn').disabled = false;
+                    document.getElementById('endBtn').disabled = true;
+                });
+                
+                retellClient.on('error', (error) => {
+                    console.error('Retell client error:', error);
+                    errorCount++;
+                    updateStatus('error', `Error: ${error.message || 'Unknown error'}`);
+                    updateCallInfo('error', 'Error');
+                    document.getElementById('errorCount').textContent = errorCount;
+                    showError(`Call error: ${error.message || 'Unknown error'}`);
+                });
+                
+                logDebug('Retell client initialized successfully');
+                return true;
+            } catch (error) {
+                console.error('Failed to initialize Retell client:', error);
+                showError(`Failed to initialize Retell client: ${error.message}`);
+                return false;
+            }
+        }
+        
+        // Join call function
+        async function joinCall() {
+            const accessToken = document.getElementById('accessToken').value.trim();
+            
+            if (!accessToken) {
+                showError('Please enter an access token');
+                return;
+            }
+            
+            if (!retellClient) {
+                if (!initRetellClient()) {
+                    return;
+                }
+            }
+            
+            try {
+                updateStatus('connecting', 'Connecting to call...');
+                updateCallInfo('connecting', 'Connecting');
+                document.getElementById('joinBtn').disabled = true;
+                
+                logDebug(`Starting call with access token: ${accessToken.substring(0, 20)}...`);
+                
+                await retellClient.startCall({
+                    accessToken: accessToken,
+                    sampleRate: 24000
+                });
+                
+                logDebug('Call start request sent successfully');
+                
+            } catch (error) {
+                console.error('Failed to start call:', error);
+                updateStatus('error', `Failed to start call: ${error.message}`);
+                updateCallInfo('error', 'Failed');
+                document.getElementById('joinBtn').disabled = false;
+                showError(`Failed to start call: ${error.message}`);
+                logDebug(`Call start error: ${error.message}`);
+            }
+        }
+        
+        // End call function
+        function endCall() {
+            if (retellClient) {
+                retellClient.stopCall();
+                logDebug('Call end request sent');
+            }
+        }
+        
+        // Update status display
+        function updateStatus(status, message) {
+            callStatus = status;
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = `status ${status}`;
+            statusDiv.textContent = `Status: ${message}`;
+        }
+        
+        // Update call information
+        function updateCallInfo(status, connection) {
+            document.getElementById('callStatus').textContent = status;
+            document.getElementById('connectionStatus').textContent = connection;
+        }
+        
+        // Show error message
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 5000);
+        }
+        
+        // Show success message
+        function showSuccess(message) {
+            const successDiv = document.getElementById('success');
+            successDiv.textContent = message;
+            successDiv.style.display = 'block';
+            setTimeout(() => {
+                successDiv.style.display = 'none';
+            }, 5000);
+        }
+        
+        // Log debug information
+        function logDebug(message) {
+            const debugDiv = document.getElementById('debugInfo');
+            const timestamp = new Date().toLocaleTimeString();
+            debugDiv.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+            debugDiv.scrollTop = debugDiv.scrollHeight;
+        }
+        
+        // Initialize on page load
+        window.addEventListener('load', () => {
+            logDebug('Page loaded, initializing Retell client...');
+            initRetellClient();
+        });
+        
+        // Handle page unload
+        window.addEventListener('beforeunload', () => {
+            if (retellClient && callStatus === 'connected') {
+                retellClient.stopCall();
+            }
+        });
+    </script>
+</body>
+</html>

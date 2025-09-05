@@ -412,16 +412,21 @@ async def create_web_call(web_call_request: WebCallRequest):
         print(f"✅ Web call created successfully for agent: {web_call_request.agent_id}")
         print(f"Web call response agent_id: {web_call_response.agent_id}")
         
-        # Construct the web call URL using the access token
+        # Extract access token and call ID from response
         access_token = getattr(web_call_response, 'access_token', None)
+        call_id = getattr(web_call_response, 'call_id', None)
+        
+        # Construct the web call URL using the access token
         web_call_url = None
         if access_token:
             web_call_url = f"https://retellai.com/web-call?access_token={access_token}"
         
+        print(f"✅ Web call created - Call ID: {call_id}, Access Token: {access_token[:20]}..." if access_token else "No access token")
+        
         return {
             "message": "Web call created successfully",
             "agent_id": web_call_response.agent_id,
-            "call_id": getattr(web_call_response, 'call_id', None),
+            "call_id": call_id,
             "web_call_url": web_call_url,
             "access_token": access_token,
             "status": "created"

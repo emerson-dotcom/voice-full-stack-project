@@ -216,3 +216,48 @@ class RetellService:
         except Exception as e:
             logger.error(f"Error getting agents: {e}")
             return None
+    
+    async def create_agent(self, agent_config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Create a new agent in Retell AI"""
+        try:
+            if not self.api_key:
+                logger.error("Retell API key not configured")
+                return None
+            
+            # Prepare the agent payload for Retell AI
+            agent_payload = {
+                "response_engine": {
+                    "llm_id": agent_config.get("llm_id", "llm_234sdertfsdsfsdf"),
+                    "type": agent_config.get("response_engine", "retell-llm")
+                },
+                "voice_id": agent_config.get("voice_id", "11labs-Adrian"),
+                "agent_name": agent_config.get("agent_name", "New Agent"),
+                "greeting": agent_config.get("greeting", "Hello, this is your AI assistant."),
+                "primary_objective": agent_config.get("primary_objective", "Assist with your request."),
+                "conversation_flow": agent_config.get("conversation_flow", []),
+                "fallback_responses": agent_config.get("fallback_responses", []),
+                "call_ending_conditions": agent_config.get("call_ending_conditions", [])
+            }
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/v1/agent",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json=agent_payload,
+                    timeout=30.0
+                )
+                
+                if response.status_code == 200:
+                    agent_data = response.json()
+                    logger.info(f"Successfully created agent: {agent_data.get('agent_id')}")
+                    return agent_data
+                else:
+                    logger.error(f"Failed to create agent: {response.status_code} - {response.text}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Error creating agent: {e}")
+            return None

@@ -87,47 +87,22 @@ async def create_retell_agent(agent_config: dict) -> str:
         
         # Create new agent in Retell AI
         agent_request = {
-            "agent_name": agent_config.get("agent_name", "Voice Agent"),
-            "llm_dynamic_config": {
-                "llm_id": "gpt-4o-mini",  # You can change this to other models
-                "llm_type": "retell-llm",
-                "llm_websocket_url": "wss://api.retellai.com/v2/llm/stream",
-                "llm_request_mapping": {
-                    "model": "gpt-4o-mini",
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": f"""
-You are a professional delivery coordination agent. Your primary objective is: {agent_config.get('primary_objective', 'Coordinate delivery details with drivers')}
-
-Greeting: {agent_config.get('greeting', 'Hello! This is your delivery coordination call.')}
-
-Follow this conversation flow:
-{chr(10).join([f"- {step.get('step', '')}: {step.get('prompt', '')}" for step in agent_config.get('conversation_flow', [])])}
-
-Fallback responses: {', '.join(agent_config.get('fallback_responses', ['I apologize, could you please repeat that?']))}
-
-Call ending conditions: {', '.join(agent_config.get('call_ending_conditions', ['All information confirmed', 'Driver confirms understanding']))}
-
-Be professional, clear, and helpful. Keep responses concise and focused on delivery coordination.
-                            """
-                        }
-                    ],
-                    "temperature": 0.3,
-                    "max_tokens": 200
-                }
+            "response_engine": {
+                "llm_id": agent_config.get("llm_id", "llm_234sdertfsdsfsdf"),
+                "type": agent_config.get("response_engine", "retell-llm")
             },
-            "voice_id": "11labs-Adrian",  # You can change this to other voices
-            "voice_config": {
-                "speed": 1.0,
-                "pitch": 1.0,
-                "stability": 0.5
-            }
+            "voice_id": agent_config.get("voice_id", "11labs-Adrian"),
+            "agent_name": agent_config.get("agent_name", "Voice Agent"),
+            "greeting": agent_config.get("greeting", "Hello, this is your AI assistant."),
+            "primary_objective": agent_config.get("primary_objective", "Assist with your request."),
+            "conversation_flow": agent_config.get("conversation_flow", []),
+            "fallback_responses": agent_config.get("fallback_responses", []),
+            "call_ending_conditions": agent_config.get("call_ending_conditions", [])
         }
         
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                "https://api.retellai.com/v2/create-agent",
+                "https://api.retellai.com/v1/agent",
                 headers={
                     "Authorization": f"Bearer {retell_api_key}",
                     "Content-Type": "application/json"
@@ -630,6 +605,84 @@ async def get_agent_by_id(agent_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error getting agent: {str(e)}")
+
+# Agent Creation Request Model
+class AgentCreationRequest(BaseModel):
+    agent_name: str
+    greeting: str
+    primary_objective: str
+    conversation_flow: List[dict]
+    fallback_responses: List[str]
+    call_ending_conditions: List[str]
+    voice_id: str = "11labs-Adrian"
+    llm_id: str = "llm_234sdertfsdsfsdf"
+    response_engine: str = "retell-llm"
+    is_active: bool = True
+
+@app.post("/api/v1/agents/create")
+async def create_agent(agent_request: AgentCreationRequest):
+    """Create a new agent in both Supabase and Retell AI"""
+    try:
+        # First, save the configuration to Supabase
+        conversation_steps = [
+            ConversationStep(**step) for step in agent_request.conversation_flow
+        ]
+        
+        config_data = AgentConfiguration(
+            agent_name=agent_request.agent_name,
+            greeting=agent_request.greeting,
+            primary_objective=agent_request.primary_objective,
+            conversation_flow=conversation_steps,
+            fallback_responses=agent_request.fallback_responses,
+            call_ending_conditions=agent_request.call_ending_conditions,
+            is_active=agent_request.is_active
+        )
+        
+        # Save to Supabase
+        saved_config = await create_agent_configuration(config_data)
+        if not saved_config:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to save agent configuration to database"
+            )
+        
+        # Prepare data for Retell AI
+        retell_config = {
+            "agent_name": agent_request.agent_name,
+            "greeting": agent_request.greeting,
+            "primary_objective": agent_request.primary_objective,
+            "conversation_flow": agent_request.conversation_flow,
+            "fallback_responses": agent_request.fallback_responses,
+            "call_ending_conditions": agent_request.call_ending_conditions,
+            "voice_id": agent_request.voice_id,
+            "llm_id": agent_request.llm_id,
+            "response_engine": agent_request.response_engine
+        }
+        
+        # Create agent in Retell AI
+        retell_agent_id = await create_retell_agent(retell_config)
+        if not retell_agent_id:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to create agent in Retell AI. Configuration saved to database."
+            )
+        
+        return {
+            "message": "Agent created successfully",
+            "agent_id": retell_agent_id,
+            "config_id": saved_config.get("id"),
+            "retell_agent": {"agent_id": retell_agent_id},
+            "config": saved_config
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error creating agent: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )
 
 # Test endpoint to verify webhook is accessible
 @app.get("/api/v1/webhooks/retell")

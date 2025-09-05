@@ -1,0 +1,23 @@
+{
+  "agent_name": "Test Agent",
+  "greeting": "Hello, this is a test agent.",
+  "primary_objective": "Test the agent creation functionality.",
+  "conversation_flow": [
+    {
+      "step": "Introduction",
+      "prompt": "Introduce yourself",
+      "required": true,
+      "order": 1
+    }
+  ],
+  "fallback_responses": [
+    "I apologize, could you please repeat that?"
+  ],
+  "call_ending_conditions": [
+    "Test completed"
+  ],
+  "voice_id": "11labs-Adrian",
+  "llm_id": "llm_234sdertfsdsfsdf",
+  "response_engine": "retell-llm",
+  "is_active": true
+}

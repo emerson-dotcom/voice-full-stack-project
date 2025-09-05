@@ -1,0 +1,492 @@
+import React, { useState, useEffect } from 'react';
+import { Save, Plus, Trash2, AlertCircle, Loader, Bot } from 'lucide-react';
+import { agentsApi } from '../utils/api';
+
+const AgentCreation = () => {
+  const [config, setConfig] = useState({
+    agentName: 'New Agent',
+    greeting: 'Hello, this is your AI assistant calling.',
+    primaryObjective: 'Assist with your request and provide helpful information.',
+    conversationFlow: [
+      {
+        id: 1,
+        step: 'Greeting',
+        prompt: 'Introduce yourself and explain the purpose of the call',
+        required: true,
+        order: 1
+      },
+      {
+        id: 2,
+        step: 'Main Task',
+        prompt: 'Address the main purpose of the call',
+        required: true,
+        order: 2
+      },
+      {
+        id: 3,
+        step: 'Closing',
+        prompt: 'Thank the person and confirm next steps',
+        required: true,
+        order: 3
+      }
+    ],
+    fallbackResponses: [
+      'I apologize, but I didn\'t catch that. Could you please repeat?',
+      'I\'m having trouble understanding. Let me try to rephrase.',
+      'Could you please speak a bit louder or more clearly?'
+    ],
+    callEndingConditions: [
+      'Task completed successfully',
+      'Person requests callback',
+      'Call duration exceeds 5 minutes',
+      'Person hangs up'
+    ],
+    // Retell AI specific configuration
+    voiceId: '11labs-Adrian',
+    llmId: 'llm_234sdertfsdsfsdf',
+    responseEngine: 'retell-llm'
+  });
+
+  const [isEditing, setIsEditing] = useState(true);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [createdAgentId, setCreatedAgentId] = useState(null);
+
+  // Transform config to API format for both Supabase and Retell AI
+  const transformConfigToAPI = (config) => ({
+    agent_name: config.agentName,
+    greeting: config.greeting,
+    primary_objective: config.primaryObjective,
+    conversation_flow: config.conversationFlow.map(step => ({
+      step: step.step,
+      prompt: step.prompt,
+      required: step.required,
+      order: step.order
+    })),
+    fallback_responses: config.fallbackResponses,
+    call_ending_conditions: config.callEndingConditions,
+    is_active: true,
+    // Retell AI specific fields
+    voice_id: config.voiceId,
+    llm_id: config.llmId,
+    response_engine: config.responseEngine
+  });
+
+  const handleInputChange = (field, value) => {
+    setConfig(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleConversationStepChange = (id, field, value) => {
+    setConfig(prev => ({
+      ...prev,
+      conversationFlow: prev.conversationFlow.map(step =>
+        step.id === id ? { ...step, [field]: value } : step
+      )
+    }));
+  };
+
+  const addConversationStep = () => {
+    const newStep = {
+      id: Date.now(),
+      step: 'New Step',
+      prompt: 'Enter the prompt for this step',
+      required: false,
+      order: config.conversationFlow.length + 1
+    };
+    setConfig(prev => ({
+      ...prev,
+      conversationFlow: [...prev.conversationFlow, newStep]
+    }));
+  };
+
+  const removeConversationStep = (id) => {
+    setConfig(prev => ({
+      ...prev,
+      conversationFlow: prev.conversationFlow.filter(step => step.id !== id)
+    }));
+  };
+
+  const handleCreateAgent = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      const apiConfig = transformConfigToAPI(config);
+      
+      const data = await agentsApi.create(apiConfig);
+      
+      setCreatedAgentId(data.agent_id);
+      setIsEditing(false);
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 5000);
+      
+    } catch (err) {
+      setError(`Failed to create agent: ${err.message}`);
+      console.error('Error creating agent:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const moveStep = (id, direction) => {
+    setConfig(prev => {
+      const flow = [...prev.conversationFlow];
+      const index = flow.findIndex(step => step.id === id);
+      if (direction === 'up' && index > 0) {
+        [flow[index], flow[index - 1]] = [flow[index - 1], flow[index]];
+      } else if (direction === 'down' && index < flow.length - 1) {
+        [flow[index], flow[index + 1]] = [flow[index + 1], flow[index]];
+      }
+      return { ...prev, conversationFlow: flow };
+    });
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Agent Creation</h1>
+          <p className="text-gray-600">Create a new voice agent with Retell AI integration</p>
+        </div>
+        <div className="flex space-x-3">
+          {isEditing ? (
+            <>
+              <button
+                onClick={() => setIsEditing(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleCreateAgent}
+                disabled={isLoading}
+                className="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+              >
+                {isLoading ? (
+                  <Loader className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Bot className="w-4 h-4 mr-2" />
+                )}
+                {isLoading ? 'Creating Agent...' : 'Create Agent'}
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setIsEditing(true)}
+              className="px-4 py-2 text-sm font-medium text-white bg-green-600 border border-transparent rounded-md hover:bg-green-700"
+            >
+              Edit Configuration
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Success Message */}
+      {showSuccess && (
+        <div className="bg-green-50 border border-green-200 rounded-md p-4">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <AlertCircle className="h-5 w-5 text-green-400" />
+            </div>
+            <div className="ml-3">
+              <p className="text-sm font-medium text-green-800">
+                Agent created successfully!
+              </p>
+              {createdAgentId && (
+                <p className="text-sm text-green-700 mt-1">
+                  Agent ID: <span className="font-mono">{createdAgentId}</span>
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Error Message */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-md p-4">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <AlertCircle className="h-5 w-5 text-red-400" />
+            </div>
+            <div className="ml-3">
+              <p className="text-sm font-medium text-red-800">
+                {error}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Basic Configuration */}
+      <div className="bg-white shadow rounded-lg p-6">
+        <h2 className="text-lg font-medium text-gray-900 mb-4">Basic Configuration</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Agent Name
+            </label>
+            <input
+              type="text"
+              value={config.agentName}
+              onChange={(e) => handleInputChange('agentName', e.target.value)}
+              disabled={!isEditing}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 disabled:bg-gray-50 disabled:text-gray-500"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Greeting Message
+            </label>
+            <textarea
+              value={config.greeting}
+              onChange={(e) => handleInputChange('greeting', e.target.value)}
+              disabled={!isEditing}
+              rows={3}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 disabled:bg-gray-50 disabled:text-gray-500"
+            />
+          </div>
+        </div>
+        <div className="mt-6">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Primary Objective
+          </label>
+          <textarea
+            value={config.primaryObjective}
+            onChange={(e) => handleInputChange('primaryObjective', e.target.value)}
+            disabled={!isEditing}
+            rows={2}
+            className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 disabled:bg-gray-50 disabled:text-gray-500"
+          />
+        </div>
+      </div>
+
+      {/* Retell AI Configuration */}
+      <div className="bg-white shadow rounded-lg p-6">
+        <h2 className="text-lg font-medium text-gray-900 mb-4">Retell AI Configuration</h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Voice ID
+            </label>
+            <input
+              type="text"
+              value={config.voiceId}
+              onChange={(e) => handleInputChange('voiceId', e.target.value)}
+              disabled={!isEditing}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 disabled:bg-gray-50 disabled:text-gray-500"
+              placeholder="e.g., 11labs-Adrian"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              LLM ID
+            </label>
+            <input
+              type="text"
+              value={config.llmId}
+              onChange={(e) => handleInputChange('llmId', e.target.value)}
+              disabled={!isEditing}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 disabled:bg-gray-50 disabled:text-gray-500"
+              placeholder="e.g., llm_234sdertfsdsfsdf"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Response Engine
+            </label>
+            <select
+              value={config.responseEngine}
+              onChange={(e) => handleInputChange('responseEngine', e.target.value)}
+              disabled={!isEditing}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 disabled:bg-gray-50 disabled:text-gray-500"
+            >
+              <option value="retell-llm">Retell LLM</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Conversation Flow */}
+      <div className="bg-white shadow rounded-lg p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-medium text-gray-900">Conversation Flow</h2>
+          {isEditing && (
+            <button
+              onClick={addConversationStep}
+              className="px-3 py-1 text-sm font-medium text-green-600 bg-green-50 border border-green-200 rounded-md hover:bg-green-100 flex items-center"
+            >
+              <Plus className="w-4 h-4 mr-1" />
+              Add Step
+            </button>
+          )}
+        </div>
+        <div className="space-y-4">
+          {config.conversationFlow.map((step, index) => (
+            <div key={step.id} className="border border-gray-200 rounded-lg p-4">
+              <div className="flex items-start justify-between">
+                <div className="flex-1 space-y-3">
+                  <div className="flex items-center space-x-3">
+                    <span className="inline-flex items-center justify-center w-6 h-6 text-xs font-medium text-gray-600 bg-gray-100 rounded-full">
+                      {step.order}
+                    </span>
+                    <input
+                      type="text"
+                      value={step.step}
+                      onChange={(e) => handleConversationStepChange(step.id, 'step', e.target.value)}
+                      disabled={!isEditing}
+                      className="text-sm font-medium text-gray-900 bg-transparent border-none focus:outline-none focus:ring-0 disabled:text-gray-900"
+                    />
+                  </div>
+                  <textarea
+                    value={step.prompt}
+                    onChange={(e) => handleConversationStepChange(step.id, 'prompt', e.target.value)}
+                    disabled={!isEditing}
+                    rows={2}
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 disabled:bg-gray-50 disabled:text-gray-500"
+                    placeholder="Enter the prompt for this conversation step..."
+                  />
+                  <div className="flex items-center space-x-4">
+                    <label className="flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={step.required}
+                        onChange={(e) => handleConversationStepChange(step.id, 'required', e.target.checked)}
+                        disabled={!isEditing}
+                        className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                      />
+                      <span className="ml-2 text-sm text-gray-700">Required step</span>
+                    </label>
+                  </div>
+                </div>
+                {isEditing && (
+                  <div className="flex flex-col space-y-2 ml-4">
+                    <button
+                      onClick={() => moveStep(step.id, 'up')}
+                      disabled={index === 0}
+                      className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      onClick={() => moveStep(step.id, 'down')}
+                      disabled={index === config.conversationFlow.length - 1}
+                      className="p-1 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                    >
+                      ↓
+                    </button>
+                    <button
+                      onClick={() => removeConversationStep(step.id)}
+                      className="p-1 text-red-400 hover:text-red-600"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Fallback Responses */}
+      <div className="bg-white shadow rounded-lg p-6">
+        <h2 className="text-lg font-medium text-gray-900 mb-4">Fallback Responses</h2>
+        <div className="space-y-3">
+          {config.fallbackResponses.map((response, index) => (
+            <div key={index} className="flex items-center space-x-3">
+              <input
+                type="text"
+                value={response}
+                onChange={(e) => {
+                  const newResponses = [...config.fallbackResponses];
+                  newResponses[index] = e.target.value;
+                  handleInputChange('fallbackResponses', newResponses);
+                }}
+                disabled={!isEditing}
+                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 disabled:bg-gray-50 disabled:text-gray-500"
+              />
+              {isEditing && (
+                <button
+                  onClick={() => {
+                    const newResponses = config.fallbackResponses.filter((_, i) => i !== index);
+                    handleInputChange('fallbackResponses', newResponses);
+                  }}
+                  className="p-2 text-red-400 hover:text-red-600"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          ))}
+          {isEditing && (
+            <button
+              onClick={() => {
+                const newResponses = [...config.fallbackResponses, 'New fallback response'];
+                handleInputChange('fallbackResponses', newResponses);
+              }}
+              className="px-3 py-1 text-sm font-medium text-green-600 bg-green-50 border border-green-200 rounded-md hover:bg-green-100 flex items-center"
+            >
+              <Plus className="w-4 h-4 mr-1" />
+              Add Fallback Response
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Call Ending Conditions */}
+      <div className="bg-white shadow rounded-lg p-6">
+        <h2 className="text-lg font-medium text-gray-900 mb-4">Call Ending Conditions</h2>
+        <div className="space-y-3">
+          {config.callEndingConditions.map((condition, index) => (
+            <div key={index} className="flex items-center space-x-3">
+              <input
+                type="text"
+                value={condition}
+                onChange={(e) => {
+                  const newConditions = [...config.callEndingConditions];
+                  newConditions[index] = e.target.value;
+                  handleInputChange('callEndingConditions', newConditions);
+                }}
+                disabled={!isEditing}
+                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 disabled:bg-gray-50 disabled:text-gray-500"
+              />
+              {isEditing && (
+                <button
+                  onClick={() => {
+                    const newConditions = config.callEndingConditions.filter((_, i) => i !== index);
+                    handleInputChange('callEndingConditions', newConditions);
+                  }}
+                  className="p-2 text-red-400 hover:text-red-600"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          ))}
+          {isEditing && (
+            <button
+              onClick={() => {
+                const newConditions = [...config.callEndingConditions, 'New ending condition'];
+                handleInputChange('callEndingConditions', newConditions);
+              }}
+              className="px-3 py-1 text-sm font-medium text-green-600 bg-green-50 border border-green-200 rounded-md hover:bg-green-100 flex items-center"
+            >
+              <Plus className="w-4 h-4 mr-1" />
+              Add Ending Condition
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default AgentCreation;

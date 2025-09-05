@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Phone, Settings, BarChart3, Menu, X, Mic, Users } from 'lucide-react';
+import { Phone, Settings, BarChart3, Menu, X, Mic, Users, Bot } from 'lucide-react';
 import AgentConfiguration from './components/AgentConfiguration';
+import AgentCreation from './components/AgentCreation';
 import CallTriggering from './components/CallTriggering';
 import CallResults from './components/CallResults';
 import VoiceCall from './components/VoiceCall';
@@ -12,6 +13,7 @@ function App() {
 
   const tabs = [
     { id: 'configuration', name: 'Agent Configuration', icon: Settings },
+    { id: 'agent-creation', name: 'Agent Creation', icon: Bot },
     { id: 'agents', name: 'Retell Agents', icon: Users },
     { id: 'triggering', name: 'Call Triggering', icon: Phone },
     { id: 'voice-call', name: 'Voice Call', icon: Mic },
@@ -22,6 +24,8 @@ function App() {
     switch (activeTab) {
       case 'configuration':
         return <AgentConfiguration />;
+      case 'agent-creation':
+        return <AgentCreation />;
       case 'agents':
         return <Agents />;
       case 'triggering':

@@ -116,6 +116,12 @@ export const agentsApi = {
   
   // Get specific agent by ID
   getById: (agentId) => apiRequest(`/agents/${agentId}`),
+  
+  // Create new agent in both Supabase and Retell AI
+  create: (agentConfig) => apiRequest('/agents/create', {
+    method: 'POST',
+    body: JSON.stringify(agentConfig),
+  }),
 };
 
 // Health check

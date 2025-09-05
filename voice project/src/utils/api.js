@@ -115,6 +115,18 @@ export const callApi = {
   }),
 };
 
+// Phone Call API functions
+export const phoneCallApi = {
+  // Create phone call using Retell AI
+  create: (phoneCallData) => apiRequest('/calls/phone-call', {
+    method: 'POST',
+    body: JSON.stringify(phoneCallData),
+  }),
+};
+
+// Convenience function for creating phone calls
+export const createPhoneCall = (phoneCallData) => phoneCallApi.create(phoneCallData);
+
 // Agents API functions
 export const agentsApi = {
   // Get all agents from Retell AI

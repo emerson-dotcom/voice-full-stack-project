@@ -7,6 +7,7 @@ import CallResults from './components/CallResults';
 import VoiceCall from './components/VoiceCall';
 import Agents from './components/Agents';
 import WebCallTest from './components/WebCallTest';
+import CreatePhone from './components/CreatePhone';
 
 function App() {
   const [activeTab, setActiveTab] = useState('configuration');
@@ -17,6 +18,7 @@ function App() {
     { id: 'agent-creation', name: 'Agent Creation', icon: Bot },
     { id: 'agents', name: 'Retell Agents', icon: Users },
     { id: 'triggering', name: 'Call Triggering', icon: Phone },
+    { id: 'create-phone', name: 'Create Phone', icon: Phone },
     { id: 'voice-call', name: 'Voice Call', icon: Mic },
     { id: 'web-call-test', name: 'Web Call Test', icon: Globe },
     { id: 'results', name: 'Call Results', icon: BarChart3 },
@@ -32,6 +34,8 @@ function App() {
         return <Agents />;
       case 'triggering':
         return <CallTriggering />;
+      case 'create-phone':
+        return <CreatePhone />;
       case 'voice-call':
         return <VoiceCall />;
       case 'web-call-test':

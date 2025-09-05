@@ -53,6 +53,10 @@ class CallRecord(BaseModel):
 class WebCallRequest(BaseModel):
     agent_id: str = Field(..., description="Retell agent ID for web call")
 
+class PhoneCallRequest(BaseModel):
+    from_number: str = Field(..., description="Phone number to call from (verified Retell number)")
+    to_number: str = Field(..., description="Phone number to call to")
+
 class CallStatusUpdate(BaseModel):
     status: str = Field(..., description="New call status")
     retell_call_id: Optional[str] = None
@@ -435,6 +439,46 @@ async def create_web_call(web_call_request: WebCallRequest):
     except Exception as e:
         print(f"❌ Error creating web call: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create web call: {str(e)}")
+
+@app.post("/api/v1/calls/phone-call")
+async def create_phone_call(phone_call_request: PhoneCallRequest):
+    """Create a phone call using Retell AI"""
+    try:
+        # Get Retell API key from environment
+        retell_api_key = os.getenv("RETELL_API_KEY")
+        if not retell_api_key:
+            raise HTTPException(status_code=500, detail="Retell API key not configured")
+        
+        # Initialize Retell client
+        client = Retell(api_key=retell_api_key)
+        
+        # Create phone call
+        phone_call_response = client.call.create_phone_call(
+            from_number=phone_call_request.from_number,
+            to_number=phone_call_request.to_number,
+        )
+        
+        print(f"✅ Phone call created successfully")
+        print(f"Phone call response agent_id: {phone_call_response.agent_id}")
+        
+        # Extract call ID from response
+        call_id = getattr(phone_call_response, 'call_id', None)
+        agent_id = getattr(phone_call_response, 'agent_id', None)
+        
+        print(f"✅ Phone call created - Call ID: {call_id}, Agent ID: {agent_id}")
+        
+        return {
+            "message": "Phone call created successfully",
+            "agent_id": agent_id,
+            "call_id": call_id,
+            "from_number": phone_call_request.from_number,
+            "to_number": phone_call_request.to_number,
+            "status": "created"
+        }
+        
+    except Exception as e:
+        print(f"❌ Error creating phone call: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create phone call: {str(e)}")
 
 @app.get("/api/v1/calls")
 async def get_call_records(limit: int = 50, offset: int = 0):

@@ -80,6 +80,12 @@ export const callApi = {
     body: JSON.stringify(callRequest),
   }),
   
+  // Trigger a voice call (WebRTC)
+  triggerVoiceCall: (callRequest) => apiRequest('/calls/voice/trigger', {
+    method: 'POST',
+    body: JSON.stringify(callRequest),
+  }),
+  
   // Get all call records
   getAll: (limit = 50, offset = 0) => 
     apiRequest(`/calls?limit=${limit}&offset=${offset}`),

@@ -109,6 +109,15 @@ export const callApi = {
     apiRequest(`/calls/status/${status}?limit=${limit}`),
 };
 
+// Agents API functions
+export const agentsApi = {
+  // Get all agents from Retell AI
+  getAll: () => apiRequest('/agents'),
+  
+  // Get specific agent by ID
+  getById: (agentId) => apiRequest(`/agents/${agentId}`),
+};
+
 // Health check
 export const healthApi = {
   check: () => apiRequest('/health'),

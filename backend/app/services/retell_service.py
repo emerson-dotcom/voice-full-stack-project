@@ -187,3 +187,32 @@ class RetellService:
             "call_id": call_id,
             "response_length": len(response_text)
         }
+    
+    async def get_all_agents(self) -> Optional[Dict[str, Any]]:
+        """Get all agents from Retell AI"""
+        try:
+            if not self.api_key:
+                logger.error("Retell API key not configured")
+                return None
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.base_url}/v1/agent",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json"
+                    },
+                    timeout=30.0
+                )
+                
+                if response.status_code == 200:
+                    agents_data = response.json()
+                    logger.info(f"Successfully retrieved {len(agents_data.get('data', []))} agents")
+                    return agents_data
+                else:
+                    logger.error(f"Failed to get agents: {response.status_code} - {response.text}")
+                    return None
+                    
+        except Exception as e:
+            logger.error(f"Error getting agents: {e}")
+            return None

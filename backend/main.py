@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
-from app.routers import agent_config, call_management, webhooks
+from app.routers import agent_config, call_management, webhooks, agents
 from app.core.config import settings
 
 app = FastAPI(
@@ -25,6 +25,7 @@ app.add_middleware(
 app.include_router(agent_config.router, prefix="/api/v1", tags=["Agent Configuration"])
 app.include_router(call_management.router, prefix="/api/v1", tags=["Call Management"])
 app.include_router(webhooks.router, prefix="/api/v1", tags=["Webhooks"])
+app.include_router(agents.router, prefix="/api/v1", tags=["Agents"])
 
 @app.get("/")
 async def root():

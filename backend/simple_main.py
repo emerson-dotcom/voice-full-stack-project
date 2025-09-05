@@ -549,6 +549,88 @@ async def get_calls_by_status(status: str, limit: int = 50):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch call records by status: {str(e)}")
 
+# Agents endpoints
+@app.get("/api/v1/agents")
+async def get_all_agents():
+    """Get all agents from Retell AI"""
+    retell_api_key = os.getenv("RETELL_API_KEY")
+    
+    if not retell_api_key:
+        return {
+            "data": [],
+            "message": "RETELL_API_KEY not configured",
+            "error": "API key missing"
+        }
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://api.retellai.com/list-agents",
+                headers={
+                    "Authorization": f"Bearer {retell_api_key}",
+                    "Content-Type": "application/json"
+                },
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                agents_data = response.json()
+                # The API returns an array directly, not wrapped in a data object
+                if isinstance(agents_data, list):
+                    print(f"✅ Successfully retrieved {len(agents_data)} agents")
+                    return {"data": agents_data}
+                else:
+                    print(f"✅ Successfully retrieved {len(agents_data.get('data', []))} agents")
+                    return agents_data
+            else:
+                print(f"❌ Failed to get agents: {response.status_code} - {response.text}")
+                return {
+                    "data": [],
+                    "message": f"Failed to retrieve agents: {response.status_code}",
+                    "error": response.text
+                }
+                
+    except Exception as e:
+        print(f"❌ Error getting agents: {e}")
+        return {
+            "data": [],
+            "message": f"Error retrieving agents: {str(e)}",
+            "error": str(e)
+        }
+
+@app.get("/api/v1/agents/{agent_id}")
+async def get_agent_by_id(agent_id: str):
+    """Get a specific agent by ID from Retell AI"""
+    retell_api_key = os.getenv("RETELL_API_KEY")
+    
+    if not retell_api_key:
+        raise HTTPException(status_code=500, detail="RETELL_API_KEY not configured")
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://api.retellai.com/v2/get-agent/{agent_id}",
+                headers={
+                    "Authorization": f"Bearer {retell_api_key}",
+                    "Content-Type": "application/json"
+                },
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                agent_data = response.json()
+                return agent_data
+            else:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Failed to get agent: {response.text}"
+                )
+                
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting agent: {str(e)}")
+
 # Test endpoint to verify webhook is accessible
 @app.get("/api/v1/webhooks/retell")
 async def webhook_test():

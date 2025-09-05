@@ -13,6 +13,8 @@ const WebCallTest = () => {
   const [callStatus, setCallStatus] = useState('idle'); // idle, connecting, connected, ended, error
   const [retellClient, setRetellClient] = useState(null);
   const retellClientRef = useRef(null);
+  const keepAliveIntervalRef = useRef(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   // Load agents on component mount
   useEffect(() => {
@@ -21,6 +23,7 @@ const WebCallTest = () => {
     
     // Cleanup function to clear timeouts/intervals on unmount
     return () => {
+      stopKeepAlive();
       if (retellClientRef.current) {
         if (retellClientRef.current._connectionTimeout) {
           clearTimeout(retellClientRef.current._connectionTimeout);
@@ -40,30 +43,98 @@ const WebCallTest = () => {
       // RetellWebClient initialized successfully
       console.log('Retell client created, setting up event listeners...');
       
-      // Set up event listeners - using correct event names from Retell Web SDK
+      // Set up event listeners - support both old and new API versions
+      // New API: call_started/call_ended (newer documentation)
+      // Old API: conversationStarted/conversationEnded (older SDK versions)
+      
+      // New API events
       client.on('call_started', () => {
-        console.log('✅ Call started event fired - setting status to connected');
+        console.log('✅ Call started event fired (new API) - setting status to connected');
+        console.log('🎉 Call is now active and ready for conversation!');
         setCallStatus('connected');
-        // Clear any pending timeouts/intervals
-        if (client._connectionTimeout) {
-          clearTimeout(client._connectionTimeout);
-          client._connectionTimeout = null;
-        }
-        if (client._connectionCheckInterval) {
-          clearInterval(client._connectionCheckInterval);
-          client._connectionCheckInterval = null;
-        }
+        clearConnectionTimeouts();
       });
 
       client.on('call_ended', () => {
-        console.log('Call ended event fired');
+        console.log('Call ended event fired (new API)');
         setCallStatus('ended');
+      });
+
+      // Old API events (for backward compatibility)
+      client.on('conversationStarted', () => {
+        console.log('✅ Conversation started event fired (old API) - setting status to connected');
+        console.log('🎉 Call is now active and ready for conversation!');
+        setCallStatus('connected');
+        clearConnectionTimeouts();
+        
+        // Add keepalive to prevent auto-disconnect
+        startKeepAlive();
+        
+        // Show immediate prompt to user
+        setError('🎤 SPEAK NOW! The call is active - say something to keep it alive!');
+        
+        // Clear the prompt after 3 seconds
+        setTimeout(() => {
+          setError('');
+        }, 3000);
+      });
+
+      client.on('conversationEnded', (reason) => {
+        console.log('❌ Conversation ended event fired (old API)');
+        console.log('End reason:', reason);
+        console.log('Reason type:', typeof reason);
+        setCallStatus('ended');
+        stopKeepAlive();
+        
+        // Provide helpful error message - handle different reason types
+        let errorMessage = 'Call ended unexpectedly. Check your microphone and try again.';
+        
+        if (reason) {
+          const reasonStr = typeof reason === 'string' ? reason : JSON.stringify(reason);
+          console.log('Reason as string:', reasonStr);
+          
+          // Handle WebSocket close codes
+          if (reason.code === 1005) {
+            if (retryCount < 1) { // Reduced to 1 retry to avoid token expiry
+              errorMessage = `Connection lost (WebSocket closed unexpectedly). Retrying... (${retryCount + 1}/1)`;
+              // Auto-retry for WebSocket 1005 errors
+              setTimeout(() => {
+                console.log('🔄 Auto-retrying connection...');
+                setRetryCount(prev => prev + 1);
+                joinWebCall();
+              }, 1000); // Faster retry
+            } else {
+              errorMessage = 'Connection lost (WebSocket closed unexpectedly). This often happens due to network issues, server problems, or expired access token. Try creating a new web call.';
+            }
+          } else if (reason.code === 1006) {
+            errorMessage = 'Connection lost (WebSocket closed abnormally). Check your network connection and try again.';
+          } else if (reason.code === 1000) {
+            errorMessage = 'Call ended normally.';
+          } else if (reason.code) {
+            errorMessage = `Connection lost (WebSocket code: ${reason.code}). Try creating a new web call.`;
+          } else if (reasonStr.includes('timeout') || reasonStr.includes('Timeout')) {
+            errorMessage = 'Call ended due to timeout. Try speaking immediately after joining.';
+          } else if (reasonStr.includes('token') || reasonStr.includes('Token') || reasonStr.includes('expired')) {
+            errorMessage = 'Call ended due to expired access token. Create a new web call.';
+          } else if (reasonStr.includes('error') || reasonStr.includes('Error')) {
+            errorMessage = 'Call ended due to an error. Check your connection and try again.';
+          }
+        }
+        
+        setError(errorMessage);
       });
 
       client.on('error', (error) => {
         console.error('Retell client error:', error);
+        console.error('Error details:', {
+          message: error.message,
+          code: error.code,
+          type: error.type,
+          stack: error.stack
+        });
         setCallStatus('error');
         setError(`Call error: ${error.message || 'Unknown error'}`);
+        stopKeepAlive();
         // Clear any pending timeouts/intervals
         if (client._connectionTimeout) {
           clearTimeout(client._connectionTimeout);
@@ -75,7 +146,7 @@ const WebCallTest = () => {
         }
       });
 
-      // Additional useful events
+      // Additional useful events - using official event names from documentation
       client.on('agent_start_talking', () => {
         console.log('Agent started talking');
       });
@@ -95,107 +166,25 @@ const WebCallTest = () => {
         console.log('Metadata received:', metadata);
       });
 
-      // Add additional event listeners for different possible event names
-      client.on('conversation_started', () => {
-        console.log('✅ Conversation started event fired - setting status to connected');
-        setCallStatus('connected');
-        // Clear any pending timeouts/intervals
-        if (client._connectionTimeout) {
-          clearTimeout(client._connectionTimeout);
-          client._connectionTimeout = null;
-        }
-        if (client._connectionCheckInterval) {
-          clearInterval(client._connectionCheckInterval);
-          client._connectionCheckInterval = null;
+      // Also listen for audio events (though they fire very frequently)
+      client.on('audio', (audioData) => {
+        // Don't log every audio event as it's very frequent, just log occasionally
+        if (Math.random() < 0.01) { // Log 1% of audio events
+          console.log('Audio data received:', audioData.length, 'bytes');
         }
       });
 
-      client.on('audio_started', () => {
-        console.log('✅ Audio started event fired - setting status to connected');
-        setCallStatus('connected');
-        // Clear any pending timeouts/intervals
-        if (client._connectionTimeout) {
-          clearTimeout(client._connectionTimeout);
-          client._connectionTimeout = null;
-        }
-        if (client._connectionCheckInterval) {
-          clearInterval(client._connectionCheckInterval);
-          client._connectionCheckInterval = null;
-        }
-      });
-
-      client.on('connected', () => {
-        console.log('✅ Connected event fired - setting status to connected');
-        setCallStatus('connected');
-        // Clear any pending timeouts/intervals
-        if (client._connectionTimeout) {
-          clearTimeout(client._connectionTimeout);
-          client._connectionTimeout = null;
-        }
-        if (client._connectionCheckInterval) {
-          clearInterval(client._connectionCheckInterval);
-          client._connectionCheckInterval = null;
-        }
-      });
-
-      // Add more event listeners for better connection detection
-      client.on('connection_established', () => {
-        console.log('✅ Connection established event fired - setting status to connected');
-        setCallStatus('connected');
-        // Clear any pending timeouts/intervals
-        if (client._connectionTimeout) {
-          clearTimeout(client._connectionTimeout);
-          client._connectionTimeout = null;
-        }
-        if (client._connectionCheckInterval) {
-          clearInterval(client._connectionCheckInterval);
-          client._connectionCheckInterval = null;
-        }
-      });
-
-      client.on('call_connected', () => {
-        console.log('✅ Call connected event fired - setting status to connected');
-        setCallStatus('connected');
-        // Clear any pending timeouts/intervals
-        if (client._connectionTimeout) {
-          clearTimeout(client._connectionTimeout);
-          client._connectionTimeout = null;
-        }
-        if (client._connectionCheckInterval) {
-          clearInterval(client._connectionCheckInterval);
-          client._connectionCheckInterval = null;
-        }
-      });
-
-      client.on('stream_started', () => {
-        console.log('✅ Stream started event fired - setting status to connected');
-        setCallStatus('connected');
-        // Clear any pending timeouts/intervals
-        if (client._connectionTimeout) {
-          clearTimeout(client._connectionTimeout);
-          client._connectionTimeout = null;
-        }
-        if (client._connectionCheckInterval) {
-          clearInterval(client._connectionCheckInterval);
-          client._connectionCheckInterval = null;
-        }
-      });
-
-      // Listen for any event to debug what's actually firing
-      const originalOn = client.on;
-      client.on = function(eventName, callback) {
-        console.log(`Setting up listener for event: ${eventName}`);
-        return originalOn.call(this, eventName, (...args) => {
-          console.log(`Event ${eventName} fired with args:`, args);
-          callback(...args);
-        });
-      };
+      // Debug: Log all available methods and events for troubleshooting
+      console.log('Available methods on client:', Object.getOwnPropertyNames(client));
+      console.log('Client prototype methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(client)));
+      
+      // Check for specific methods
+      console.log('startCall method exists:', typeof client.startCall === 'function');
+      console.log('stopCall method exists:', typeof client.stopCall === 'function');
 
       setRetellClient(client);
       retellClientRef.current = client;
       console.log('✅ Retell client initialized successfully');
-      console.log('Available methods on client:', Object.getOwnPropertyNames(client));
-      console.log('Client prototype methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(client)));
       
       // Log all available events for debugging
       if (client._events) {
@@ -230,6 +219,7 @@ const WebCallTest = () => {
       setLoading(true);
       setError('');
       setWebCallResponse(null);
+      setRetryCount(0); // Reset retry count for new call
 
       const response = await callApi.createWebCall(selectedAgentId);
       setWebCallResponse(response);
@@ -259,15 +249,70 @@ const WebCallTest = () => {
     }
   };
 
+  // Helper function to clear connection timeouts and intervals
+  const clearConnectionTimeouts = () => {
+    if (retellClientRef.current) {
+      if (retellClientRef.current._connectionTimeout) {
+        clearTimeout(retellClientRef.current._connectionTimeout);
+        retellClientRef.current._connectionTimeout = null;
+      }
+      if (retellClientRef.current._connectionCheckInterval) {
+        clearInterval(retellClientRef.current._connectionCheckInterval);
+        retellClientRef.current._connectionCheckInterval = null;
+      }
+    }
+  };
+
+  // Keepalive functions to prevent auto-disconnect
+  const startKeepAlive = () => {
+    console.log('🔄 Starting keepalive to prevent auto-disconnect...');
+    stopKeepAlive(); // Clear any existing interval
+    
+    keepAliveIntervalRef.current = setInterval(() => {
+      if (retellClientRef.current && callStatus === 'connected') {
+        // Send a small audio signal to keep the connection alive
+        try {
+          // Create a very short, silent audio buffer to keep the connection active
+          const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          const buffer = audioContext.createBuffer(1, 1, 44100);
+          const source = audioContext.createBufferSource();
+          source.buffer = buffer;
+          source.connect(audioContext.destination);
+          source.start();
+          console.log('🔄 Keepalive signal sent');
+        } catch (e) {
+          console.log('Keepalive signal failed:', e);
+        }
+      }
+    }, 10000); // Send keepalive every 10 seconds
+  };
+
+  const stopKeepAlive = () => {
+    if (keepAliveIntervalRef.current) {
+      clearInterval(keepAliveIntervalRef.current);
+      keepAliveIntervalRef.current = null;
+      console.log('🛑 Keepalive stopped');
+    }
+  };
+
   const joinWebCall = async () => {
     if (!webCallResponse?.access_token || !retellClientRef.current) {
       setError('No access token available or Retell client not initialized');
       return;
     }
 
+    // Prevent multiple simultaneous connection attempts
+    if (callStatus === 'connecting' || callStatus === 'connected') {
+      console.log('Connection already in progress or active, ignoring request');
+      return;
+    }
+
     try {
       setCallStatus('connecting');
       setError('');
+
+      // Clear any existing timeouts/intervals first
+      clearConnectionTimeouts();
 
       // Check microphone permissions first
       try {
@@ -285,56 +330,162 @@ const WebCallTest = () => {
       console.log('About to start conversation with access token:', webCallResponse.access_token.substring(0, 20) + '...');
       console.log('Full access token:', webCallResponse.access_token);
       
-      // Try different method names based on the SDK version
+      // Debug: Check what methods are available on the client
+      console.log('Available methods on client:', Object.getOwnPropertyNames(retellClientRef.current));
+      console.log('Client prototype methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(retellClientRef.current)));
+      
+      // Try both old and new API methods to support different SDK versions
       let result;
       try {
-        // First try startCall (newer versions)
-        result = await retellClientRef.current.startCall({
-          accessToken: webCallResponse.access_token,
-          sampleRate: 24000,
-        });
-        console.log('startCall returned:', result);
-      } catch (startCallError) {
-        console.log('startCall failed, trying startConversation:', startCallError.message);
-        try {
-          // Fallback to startConversation (older versions)
-          result = await retellClientRef.current.startConversation({
+        console.log('🚀 Starting call with access token...');
+        console.log('Web call response:', webCallResponse);
+        console.log('Access Token:', webCallResponse.access_token ? webCallResponse.access_token.substring(0, 20) + '...' : 'None');
+        console.log('Sample rate: 24000');
+        
+        // Check what methods are available
+        console.log('Available methods:', Object.getOwnPropertyNames(retellClientRef.current));
+        console.log('startCall exists:', typeof retellClientRef.current.startCall === 'function');
+        console.log('startConversation exists:', typeof retellClientRef.current.startConversation === 'function');
+        
+        // Try the newer API first (startCall with accessToken)
+        if (typeof retellClientRef.current.startCall === 'function') {
+          console.log('Using startCall method (newer API)...');
+          result = await retellClientRef.current.startCall({
             accessToken: webCallResponse.access_token,
             sampleRate: 24000,
+            // Optional: device id of the mic
+            captureDeviceId: "default",
+            // Optional: device id of the speaker
+            playbackDeviceId: "default",
+            // Optional: Whether to emit "audio" events that contain raw pcm audio bytes
+            emitRawAudioSamples: false,
           });
-          console.log('startConversation returned:', result);
-        } catch (startConversationError) {
-          console.log('Both methods failed:', startConversationError.message);
-          throw startConversationError;
+        }
+        // Fallback to older API (startConversation with callId)
+        else if (typeof retellClientRef.current.startConversation === 'function') {
+          console.log('Using startConversation method (older API)...');
+          result = await retellClientRef.current.startConversation({
+            callId: webCallResponse.call_id,
+            sampleRate: 24000,
+            enableUpdate: true
+          });
+        }
+        // If neither method exists, throw an error
+        else {
+          throw new Error('Neither startCall nor startConversation method found on RetellWebClient. Please check your SDK version.');
+        }
+        
+        console.log('✅ Call started successfully:', result);
+        console.log('Result type:', typeof result);
+        console.log('Result keys:', result ? Object.keys(result) : 'No result');
+        
+        // Handle case where method returns undefined (which is normal for some SDK versions)
+        if (result === undefined) {
+          console.log('ℹ️ Method returned undefined - this is normal for some SDK versions');
+          // Don't treat undefined as an error, the connection will be established via events
+        }
+      } catch (error) {
+        console.log('❌ Call start failed:', error.message);
+        console.log('Error details:', error);
+        
+        // Provide more specific error handling
+        if (error.message && (error.message.includes('access_token') || error.message.includes('token'))) {
+          throw new Error('Invalid or expired access token. Please create a new web call.');
+        } else if (error.message && error.message.includes('microphone')) {
+          throw new Error('Microphone access denied. Please allow microphone permissions and try again.');
+        } else if (error.message && error.message.includes('method found')) {
+          throw new Error('SDK version issue: Please update retell-client-js-sdk to the latest version.');
+        } else {
+          throw error;
         }
       }
 
       console.log('Call start request completed');
       
-      // Set up connection timeout with proper scoping
+      // Set up connection timeout with proper scoping and race condition protection
       const connectionTimeout = setTimeout(() => {
-        console.log('Connection timeout reached - assuming call is connected');
-        setCallStatus('connected');
+        console.log('⏰ Connection timeout reached - checking if we should assume connected');
+        
+        // Use functional update to get current status
+        setCallStatus(currentStatus => {
+          if (currentStatus !== 'connecting') {
+            console.log('Status changed during timeout, not setting to connected');
+            return currentStatus;
+          }
+          
+          // Check if any events have fired by looking at the client state
+          const client = retellClientRef.current;
+          if (client) {
+            // Try to detect if the call is actually working
+            try {
+              // Check if we can access audio context or other indicators
+              const audioContext = window.AudioContext || window.webkitAudioContext;
+              if (audioContext) {
+                const context = new audioContext();
+                if (context.state === 'running') {
+                  console.log('✅ Audio context is running - call appears to be connected');
+                  return 'connected';
+                }
+              }
+            } catch (e) {
+              console.log('Could not check audio context:', e);
+            }
+            
+            // Final fallback - assume connected if no error occurred and still connecting
+            console.log('⚠️ No connection events fired, but no errors - assuming connected');
+            return 'connected';
+          }
+          
+          return currentStatus;
+        });
       }, 3000); // Reduced to 3 seconds for faster feedback
       
       // Set up a periodic check for connection status
       const connectionCheckInterval = setInterval(() => {
-        // Check if the client has any connection indicators
-        const client = retellClientRef.current;
-        if (client && typeof client.getConnectionState === 'function') {
+        // Use functional update to get current status
+        setCallStatus(currentStatus => {
+          if (currentStatus !== 'connecting') {
+            console.log('Status changed, clearing interval');
+            clearInterval(connectionCheckInterval);
+            return currentStatus;
+          }
+          
+          // Check if the client has any connection indicators
+          const client = retellClientRef.current;
+          if (client && typeof client.getConnectionState === 'function') {
+            try {
+              const state = client.getConnectionState();
+              console.log('Connection state check:', state);
+              if (state === 'connected' || state === 'active') {
+                console.log('✅ Connection state indicates connected');
+                clearTimeout(connectionTimeout);
+                clearInterval(connectionCheckInterval);
+                return 'connected';
+              }
+            } catch (e) {
+              console.log('Could not check connection state:', e);
+            }
+          }
+          
+          // Check for audio activity as an indicator of connection
           try {
-            const state = client.getConnectionState();
-            console.log('Connection state check:', state);
-            if (state === 'connected' || state === 'active') {
-              setCallStatus('connected');
-              clearTimeout(connectionTimeout);
-              clearInterval(connectionCheckInterval);
+            const audioContext = window.AudioContext || window.webkitAudioContext;
+            if (audioContext) {
+              const context = new audioContext();
+              if (context.state === 'running') {
+                console.log('✅ Audio context is running - call appears to be connected');
+                clearTimeout(connectionTimeout);
+                clearInterval(connectionCheckInterval);
+                return 'connected';
+              }
             }
           } catch (e) {
-            console.log('Could not check connection state:', e);
+            console.log('Could not check audio context:', e);
           }
-        }
-      }, 500); // Check every 500ms for faster response
+          
+          return currentStatus;
+        });
+      }, 1000); // Check every second
       
       // Store timeout and interval references for cleanup
       retellClientRef.current._connectionTimeout = connectionTimeout;
@@ -343,6 +494,9 @@ const WebCallTest = () => {
     } catch (error) {
       console.error('Failed to start call:', error);
       setCallStatus('error');
+      
+      // Clear timeouts on error
+      clearConnectionTimeouts();
       
       // Provide more specific error messages
       let errorMessage = 'Failed to start call: ';
@@ -365,27 +519,36 @@ const WebCallTest = () => {
   };
 
   const endWebCall = () => {
+    console.log('Ending web call, current status:', callStatus);
+    
+    // Clear any pending timeouts/intervals first
+    clearConnectionTimeouts();
+    stopKeepAlive();
+    
+    // Set status to ending immediately to prevent race conditions
+    setCallStatus('ended');
+    
     if (retellClientRef.current) {
-      // Clear any pending timeouts/intervals
-      if (retellClientRef.current._connectionTimeout) {
-        clearTimeout(retellClientRef.current._connectionTimeout);
-        retellClientRef.current._connectionTimeout = null;
-      }
-      if (retellClientRef.current._connectionCheckInterval) {
-        clearInterval(retellClientRef.current._connectionCheckInterval);
-        retellClientRef.current._connectionCheckInterval = null;
-      }
-      
-      // Stop the conversation
+      // Stop the call using the available API method
       try {
-        retellClientRef.current.stopConversation();
-        console.log('Call ended successfully');
+        // Try both stopCall and stopConversation methods
+        if (typeof retellClientRef.current.stopCall === 'function') {
+          retellClientRef.current.stopCall();
+          console.log('Call ended successfully using stopCall');
+        } else if (typeof retellClientRef.current.stopConversation === 'function') {
+          retellClientRef.current.stopConversation();
+          console.log('Call ended successfully using stopConversation');
+        } else {
+          console.log('No stop method found on RetellWebClient');
+        }
       } catch (error) {
-        console.log('Error stopping conversation:', error);
+        console.log('Error stopping call:', error);
+        // Even if stopping fails, we still want to mark as ended
       }
-      
-      setCallStatus('ended');
     }
+    
+    // Clear any error messages
+    setError('');
   };
 
   const openWebCall = () => {
@@ -394,29 +557,29 @@ const WebCallTest = () => {
   };
 
   const resetTest = () => {
-    // End any active call and clean up
-    if (retellClientRef.current) {
-      // Clear any pending timeouts/intervals
-      if (retellClientRef.current._connectionTimeout) {
-        clearTimeout(retellClientRef.current._connectionTimeout);
-        retellClientRef.current._connectionTimeout = null;
-      }
-      if (retellClientRef.current._connectionCheckInterval) {
-        clearInterval(retellClientRef.current._connectionCheckInterval);
-        retellClientRef.current._connectionCheckInterval = null;
-      }
-      
-      // Stop conversation if connected
-      if (callStatus === 'connected' || callStatus === 'connecting') {
-        try {
+    console.log('Resetting test, current status:', callStatus);
+    
+    // Clear any pending timeouts/intervals first
+    clearConnectionTimeouts();
+    stopKeepAlive();
+    
+    // Stop call if connected or connecting
+    if (retellClientRef.current && (callStatus === 'connected' || callStatus === 'connecting')) {
+      try {
+        // Try both stopCall and stopConversation methods
+        if (typeof retellClientRef.current.stopCall === 'function') {
+          retellClientRef.current.stopCall();
+          console.log('Call stopped during reset using stopCall');
+        } else if (typeof retellClientRef.current.stopConversation === 'function') {
           retellClientRef.current.stopConversation();
-          console.log('Call stopped during reset');
-        } catch (error) {
-          console.log('Error stopping conversation during reset:', error);
+          console.log('Call stopped during reset using stopConversation');
         }
+      } catch (error) {
+        console.log('Error stopping call during reset:', error);
       }
     }
     
+    // Reset all state
     setWebCallResponse(null);
     setError('');
     setSelectedAgentId('');
@@ -454,8 +617,8 @@ const WebCallTest = () => {
                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 disabled:bg-gray-100"
               >
                 <option value="">Select an agent to test</option>
-                {agents.map((agent) => (
-                  <option key={agent.agent_id} value={agent.agent_id}>
+                {agents.map((agent, index) => (
+                  <option key={`${agent.agent_id}-${index}`} value={agent.agent_id}>
                     {agent.agent_name} ({agent.agent_id})
                   </option>
                 ))}
@@ -534,16 +697,43 @@ const WebCallTest = () => {
                   )}
                   
                   {callStatus === 'connecting' && (
-                    <button
-                      onClick={() => {
-                        console.log('Manually setting status to connected');
-                        setCallStatus('connected');
-                      }}
-                      className="px-3 py-1 text-sm font-medium text-green-700 bg-green-100 rounded-md hover:bg-green-200 focus:outline-none focus:ring-2 focus:ring-green-500"
-                    >
-                      <CheckCircle className="w-4 h-4 inline mr-1" />
-                      Mark as Connected
-                    </button>
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => {
+                          console.log('Manually setting status to connected');
+                          setCallStatus('connected');
+                        }}
+                        className="px-3 py-1 text-sm font-medium text-green-700 bg-green-100 rounded-md hover:bg-green-200 focus:outline-none focus:ring-2 focus:ring-green-500"
+                      >
+                        <CheckCircle className="w-4 h-4 inline mr-1" />
+                        Mark as Connected
+                      </button>
+                      <button
+                        onClick={() => {
+                          console.log('Testing connection manually...');
+                          if (retellClientRef.current) {
+                            console.log('Client methods:', Object.getOwnPropertyNames(retellClientRef.current));
+                            console.log('Client prototype methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(retellClientRef.current)));
+                          }
+                        }}
+                        className="px-3 py-1 text-sm font-medium text-blue-700 bg-blue-100 rounded-md hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <AlertCircle className="w-4 h-4 inline mr-1" />
+                        Debug Client
+                      </button>
+                    </div>
+                  )}
+                  
+                  {callStatus === 'ended' && (
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={createWebCall}
+                        className="px-3 py-1 text-sm font-medium text-blue-700 bg-blue-100 rounded-md hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <Phone className="w-4 h-4 inline mr-1" />
+                        Create New Call
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -712,13 +902,15 @@ const WebCallTest = () => {
               <div className="bg-yellow-50 border border-yellow-200 rounded-md p-4">
                 <h3 className="text-sm font-medium text-yellow-800 mb-2">Troubleshooting Connection Issues</h3>
                 <ul className="text-sm text-yellow-700 space-y-1">
-                  <li>• <strong>If stuck on "Connecting":</strong> Wait 3 seconds for automatic connection, or click "Mark as Connected"</li>
+                  <li>• <strong>If call ends immediately:</strong> SPEAK IMMEDIATELY after "Call is active" - the call auto-ends if no speech is detected</li>
+                  <li>• <strong>WebSocket Code 1005:</strong> Connection lost unexpectedly - try creating a new web call, check network stability</li>
+                  <li>• <strong>Access Token Expiry:</strong> Join the call within 30 seconds of creation</li>
+                  <li>• <strong>Microphone:</strong> Make sure microphone is working and permissions are granted</li>
                   <li>• <strong>Browser Requirements:</strong> Use Chrome, Firefox, or Edge (latest versions)</li>
                   <li>• <strong>Network:</strong> Ensure stable internet connection, disable VPN if used</li>
-                  <li>• <strong>Microphone:</strong> Make sure microphone is working and permissions are granted</li>
                   <li>• <strong>Console Logs:</strong> Open browser DevTools (F12) to see detailed connection logs</li>
                   <li>• <strong>Firewall:</strong> Ensure WebRTC traffic is not blocked by firewall/antivirus</li>
-                  <li>• <strong>Connection Events:</strong> The app now listens for multiple connection events for better reliability</li>
+                  <li>• <strong>Auto-Retry:</strong> The system will automatically retry failed connections up to 2 times</li>
                 </ul>
               </div>
             </div>

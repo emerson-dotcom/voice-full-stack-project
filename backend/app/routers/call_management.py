@@ -210,6 +210,7 @@ async def create_web_call(web_call_request: WebCallRequest):
             "message": "Web call created successfully",
             "agent_id": web_call_response["agent_id"],
             "call_id": web_call_response.get("call_id"),
+            "access_token": web_call_response.get("access_token"),
             "web_call_url": web_call_response.get("web_call_url"),
             "status": web_call_response["status"]
         }

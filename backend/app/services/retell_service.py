@@ -283,6 +283,7 @@ class RetellService:
             return {
                 "agent_id": web_call_response.agent_id,
                 "call_id": getattr(web_call_response, 'call_id', None),
+                "access_token": getattr(web_call_response, 'access_token', None),
                 "status": "created",
                 "web_call_url": getattr(web_call_response, 'web_call_url', None)
             }

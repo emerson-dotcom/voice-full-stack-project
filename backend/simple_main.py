@@ -13,6 +13,7 @@ import uvicorn
 import httpx
 import os
 from supabase_simple import get_supabase_client
+from retell import Retell
 
 # Pydantic models for Agent Configuration
 class ConversationStep(BaseModel):
@@ -48,20 +49,9 @@ class CallRecord(BaseModel):
     id: Optional[int] = None
     call_id: str = Field(..., description="Unique call identifier")
     agent_config_id: int
-    driver_name: str
-    phone_number: str
-    load_number: str
-    delivery_address: Optional[str] = None
-    expected_delivery_time: Optional[datetime] = None
-    special_instructions: Optional[str] = None
-    status: str = Field(default="initiated", description="Call status: initiated, in_progress, completed, failed")
-    retell_call_id: Optional[str] = None
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    duration_seconds: Optional[int] = None
-    call_summary: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+
+class WebCallRequest(BaseModel):
+    agent_id: str = Field(..., description="Retell agent ID for web call")
 
 class CallStatusUpdate(BaseModel):
     status: str = Field(..., description="New call status")
@@ -401,6 +391,45 @@ async def trigger_test_call(call_request: CallRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to trigger test call: {str(e)}")
+
+@app.post("/api/v1/calls/web-call")
+async def create_web_call(web_call_request: WebCallRequest):
+    """Create a web call using Retell AI"""
+    try:
+        # Get Retell API key from environment
+        retell_api_key = os.getenv("RETELL_API_KEY")
+        if not retell_api_key:
+            raise HTTPException(status_code=500, detail="Retell API key not configured")
+        
+        # Initialize Retell client
+        client = Retell(api_key=retell_api_key)
+        
+        # Create web call
+        web_call_response = client.call.create_web_call(
+            agent_id=web_call_request.agent_id
+        )
+        
+        print(f"✅ Web call created successfully for agent: {web_call_request.agent_id}")
+        print(f"Web call response agent_id: {web_call_response.agent_id}")
+        
+        # Construct the web call URL using the access token
+        access_token = getattr(web_call_response, 'access_token', None)
+        web_call_url = None
+        if access_token:
+            web_call_url = f"https://retellai.com/web-call?access_token={access_token}"
+        
+        return {
+            "message": "Web call created successfully",
+            "agent_id": web_call_response.agent_id,
+            "call_id": getattr(web_call_response, 'call_id', None),
+            "web_call_url": web_call_url,
+            "access_token": access_token,
+            "status": "created"
+        }
+        
+    except Exception as e:
+        print(f"❌ Error creating web call: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create web call: {str(e)}")
 
 @app.get("/api/v1/calls")
 async def get_call_records(limit: int = 50, offset: int = 0):

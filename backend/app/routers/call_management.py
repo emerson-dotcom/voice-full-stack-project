@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
-from typing import List
+from typing import List, Dict, Any
+from pydantic import BaseModel
 from app.models.call import CallTrigger, CallResult
 from app.services.call_service import CallService
 from app.services.retell_service import RetellService
@@ -11,6 +12,10 @@ router = APIRouter()
 # Initialize services
 call_service = CallService()
 retell_service = RetellService()
+
+# Pydantic models
+class WebCallRequest(BaseModel):
+    agent_id: str
 
 @router.post("/calls/trigger", status_code=status.HTTP_201_CREATED)
 async def trigger_call(call_trigger: CallTrigger):
@@ -185,6 +190,34 @@ async def end_call(call_id: str):
         raise
     except Exception as e:
         logger.error(f"Error ending call {call_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+@router.post("/calls/web-call", response_model=Dict[str, Any])
+async def create_web_call(web_call_request: WebCallRequest):
+    """Create a web call using Retell AI"""
+    try:
+        web_call_response = await retell_service.create_web_call(web_call_request.agent_id)
+        if not web_call_response:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create web call"
+            )
+        
+        return {
+            "message": "Web call created successfully",
+            "agent_id": web_call_response["agent_id"],
+            "call_id": web_call_response.get("call_id"),
+            "web_call_url": web_call_response.get("web_call_url"),
+            "status": web_call_response["status"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating web call: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"

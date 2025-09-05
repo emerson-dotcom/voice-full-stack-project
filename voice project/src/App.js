@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Phone, Settings, BarChart3, Menu, X, Mic, Users, Bot } from 'lucide-react';
+import { Phone, Settings, BarChart3, Menu, X, Mic, Users, Bot, Globe } from 'lucide-react';
 import AgentConfiguration from './components/AgentConfiguration';
 import AgentCreation from './components/AgentCreation';
 import CallTriggering from './components/CallTriggering';
 import CallResults from './components/CallResults';
 import VoiceCall from './components/VoiceCall';
 import Agents from './components/Agents';
+import WebCallTest from './components/WebCallTest';
 
 function App() {
   const [activeTab, setActiveTab] = useState('configuration');
@@ -17,6 +18,7 @@ function App() {
     { id: 'agents', name: 'Retell Agents', icon: Users },
     { id: 'triggering', name: 'Call Triggering', icon: Phone },
     { id: 'voice-call', name: 'Voice Call', icon: Mic },
+    { id: 'web-call-test', name: 'Web Call Test', icon: Globe },
     { id: 'results', name: 'Call Results', icon: BarChart3 },
   ];
 
@@ -32,6 +34,8 @@ function App() {
         return <CallTriggering />;
       case 'voice-call':
         return <VoiceCall />;
+      case 'web-call-test':
+        return <WebCallTest />;
       case 'results':
         return <CallResults />;
       default:

@@ -107,6 +107,12 @@ export const callApi = {
   // Get calls by status
   getByStatus: (status, limit = 50) => 
     apiRequest(`/calls/status/${status}?limit=${limit}`),
+  
+  // Create web call
+  createWebCall: (agentId) => apiRequest('/calls/web-call', {
+    method: 'POST',
+    body: JSON.stringify({ agent_id: agentId }),
+  }),
 };
 
 // Agents API functions

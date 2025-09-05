@@ -5,6 +5,7 @@ from app.core.config import settings
 from app.models.call import CallTrigger
 from app.services.agent_config_service import AgentConfigurationService
 import json
+from retell import Retell
 
 logger = logging.getLogger(__name__)
 
@@ -13,6 +14,8 @@ class RetellService:
         self.api_key = settings.retell_api_key
         self.base_url = "https://api.retellai.com"
         self.agent_config_service = AgentConfigurationService()
+        # Initialize Retell client
+        self.client = Retell(api_key=self.api_key) if self.api_key else None
     
     async def initiate_call(self, call_trigger: CallTrigger) -> Optional[Dict[str, Any]]:
         """Initiate a voice call using Retell AI"""
@@ -260,4 +263,30 @@ class RetellService:
                     
         except Exception as e:
             logger.error(f"Error creating agent: {e}")
+            return None
+    
+    async def create_web_call(self, agent_id: str) -> Optional[Dict[str, Any]]:
+        """Create a web call using the official Retell SDK"""
+        try:
+            if not self.client:
+                logger.error("Retell client not initialized - API key not configured")
+                return None
+            
+            # Use the official Retell SDK to create web call
+            web_call_response = self.client.call.create_web_call(
+                agent_id=agent_id
+            )
+            
+            logger.info(f"Successfully created web call for agent: {agent_id}")
+            logger.info(f"Web call response agent_id: {web_call_response.agent_id}")
+            
+            return {
+                "agent_id": web_call_response.agent_id,
+                "call_id": getattr(web_call_response, 'call_id', None),
+                "status": "created",
+                "web_call_url": getattr(web_call_response, 'web_call_url', None)
+            }
+            
+        except Exception as e:
+            logger.error(f"Error creating web call: {e}")
             return None
